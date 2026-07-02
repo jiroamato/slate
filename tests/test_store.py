@@ -1,8 +1,6 @@
-import json
 
 import pytest
 
-from slate import store as store_mod
 from slate.output import SlateError
 from slate.store import Store, find_store, require_store, to_posix
 

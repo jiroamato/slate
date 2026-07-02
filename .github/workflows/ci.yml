@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check
+      - run: uv run pytest -q
+
+  byte-identity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Run identical store script and digest the bytes
+        shell: bash
+        run: bash scripts/byte_identity.sh > digest-${{ matrix.os }}.txt && cat digest-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.os }}
+          path: digest-*.txt
+
+  byte-identity-compare:
+    needs: byte-identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Assert store bytes identical across all OSes
+        run: |
+          cat digest-*.txt
+          if [ "$(sort -u digest-*.txt | wc -l)" -ne 1 ]; then
+            echo "::error::store files are not byte-identical across OSes"
+            exit 1
+          fi
+
+  hook-perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run python scripts/hook_perf.py

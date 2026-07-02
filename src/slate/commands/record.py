@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shlex
-from pathlib import Path
 
 from slate import gitctx, schema
 from slate.anchors import assert_writable_dir_anchor, infer_dir_anchors, normalize_dir_anchor
