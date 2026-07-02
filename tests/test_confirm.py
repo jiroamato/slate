@@ -68,6 +68,28 @@ def test_confirm_records_optional_outcome_fields(seeded, capsys):
     ]
 
 
+def test_confirm_drops_empty_optional_string_fields(seeded, capsys):
+    # parity with `slate record --outcome-*`: an optional string outcome field
+    # is either present with content or absent — never an empty string
+    target = rid(seeded, "api", 0)
+    assert main(["confirm", "api", target, "--test-results", "", "--agent", ""]) == 0
+    assert records(seeded, "api")[0]["outcomes"] == [{"status": "success"}]
+
+
+def test_record_and_confirm_build_identical_outcomes(seeded, capsys):
+    main(["record", "api", "--type", "guide", "--name", "release steps",
+          "--description", "tag then publish", "--outcome-status", "success",
+          "--outcome-duration", "90", "--outcome-test-results", "12 passed",
+          "--outcome-agent", "claude"])
+    capsys.readouterr()
+    target = rid(seeded, "api", 1)
+    assert main(["confirm", "api", target, "--duration", "90",
+                 "--test-results", "12 passed", "--agent", "claude"]) == 0
+    recorded = records(seeded, "api")[2]["outcomes"][0]
+    confirmed = records(seeded, "api")[1]["outcomes"][0]
+    assert recorded == confirmed  # one outcome shape, one builder
+
+
 def test_confirm_validates_status(seeded, capsys):
     target = rid(seeded, "api", 0)
     with pytest.raises(SystemExit) as exc:  # argparse rejects the bad choice

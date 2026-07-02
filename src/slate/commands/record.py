@@ -14,6 +14,29 @@ from slate.store import Store, dumps_record, require_store
 EVIDENCE_FLAGS = ("commit", "date", "issue", "file", "bead", "seeds", "gh", "linear")
 
 
+def build_outcome(
+    status: str,
+    *,
+    duration: int | None = None,
+    test_results: str | None = None,
+    agent: str | None = None,
+) -> dict:
+    """The one outcome shape, shared by `record --outcome-*` and `confirm`.
+
+    `duration` is kept when not None (0 is meaningful); the optional string
+    fields are deliberately truthiness-gated — an outcome field is either
+    present with content or absent, never an empty string.
+    """
+    outcome: dict = {"status": status}
+    if duration is not None:
+        outcome["duration"] = duration
+    if test_results:
+        outcome["test_results"] = test_results
+    if agent:
+        outcome["agent"] = agent
+    return outcome
+
+
 def _parser():
     parser = base_parser("record", "Append a typed expertise record to a domain.")
     parser.add_argument("domain")
@@ -92,14 +115,14 @@ def build_record(args) -> dict:
         record["supersedes"] = csv_list(args.supersedes)
 
     if args.outcome_status:
-        outcome = {"status": args.outcome_status}
-        if args.outcome_duration is not None:
-            outcome["duration"] = args.outcome_duration
-        if args.outcome_test_results:
-            outcome["test_results"] = args.outcome_test_results
-        if args.outcome_agent:
-            outcome["agent"] = args.outcome_agent
-        record["outcomes"] = [outcome]
+        record["outcomes"] = [
+            build_outcome(
+                args.outcome_status,
+                duration=args.outcome_duration,
+                test_results=args.outcome_test_results,
+                agent=args.outcome_agent,
+            )
+        ]
 
     anchors = []
     for raw in args.dir_anchors:

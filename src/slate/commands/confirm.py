@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from slate import schema
 from slate.commands._common import base_parser
+from slate.commands.record import build_outcome
 from slate.output import SlateError, emit
 from slate.store import require_store, resolve_id
 
@@ -34,14 +35,13 @@ def run(argv: list[str]) -> int:
             retry="slate query --all",
         )
 
-    # same outcome shape as `slate record --outcome-*` — no extra fields
-    outcome: dict = {"status": args.status}
-    if args.duration is not None:
-        outcome["duration"] = args.duration
-    if args.test_results:
-        outcome["test_results"] = args.test_results
-    if args.agent:
-        outcome["agent"] = args.agent
+    # same outcome shape as `slate record --outcome-*` — one shared builder
+    outcome = build_outcome(
+        args.status,
+        duration=args.duration,
+        test_results=args.test_results,
+        agent=args.agent,
+    )
 
     result: dict = {}
 
