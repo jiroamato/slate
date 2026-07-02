@@ -53,6 +53,20 @@ def test_doctor_reports_malformed_force_log(repo, capsys):
     assert "malformed" in out
 
 
+def test_dedup_gate_blocks_realistic_paraphrase(repo, capsys):
+    # measured at similarity ~0.54 — the shipped 0.5 threshold must catch it
+    main(["record", "storage", "--type", "pattern", "--name", "atomic writes",
+          "--description", "same-directory temp file then os.replace"])
+    main(["record", "storage", "--type", "failure",
+          "--description", "windows os.replace hit PermissionError under antivirus scans",
+          "--resolution", "bounded retry with backoff around os.replace"])
+    capsys.readouterr()
+    code = main(["record", "storage", "--type", "failure",
+                 "--description", "windows os.replace hits PermissionError when antivirus scans the file",
+                 "--resolution", "retry os.replace with backoff"])
+    assert code == 3
+
+
 # 3. dedup retry command must not use POSIX-only quoting
 
 

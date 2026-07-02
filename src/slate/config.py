@@ -17,9 +17,11 @@ from slate.store import Store
 # dedup.threshold is a normalized similarity in [0, 1]: the top BM25 score of
 # any existing record divided by the candidate's own self-score, which keeps
 # the gate stable across corpus sizes (raw BM25 collapses on tiny domains).
-# Shipped default tuned against the golden-store fixture
-# (tests/test_record.py::test_default_threshold_separates_near_dup_from_related).
-DEFAULT_DEDUP_THRESHOLD = 0.6
+# Tuned on measured pairs: realistic paraphrases land at ~0.54-0.68,
+# related-but-different records at ~0.0-0.03, near-identical at ~0.85+ —
+# 0.5 blocks paraphrases with wide margins on both sides
+# (tests/test_record.py, tests/test_review_fixes.py pin these cases).
+DEFAULT_DEDUP_THRESHOLD = 0.5
 
 DEFAULTS: dict[str, Any] = {
     "version": "1",
