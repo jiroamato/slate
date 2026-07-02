@@ -110,7 +110,18 @@ holds whether the domain has 2 records or 200. `--force` writes are logged;
 | Stop | Blocks turn-end **at most once** when the session changed ≥3 files or ≥40 lines with no store write and no ack |
 | Permissions | Denies direct Edit/Write on `.slate/expertise/*.jsonl` — the CLI (validation + dedup gate) is the only write path |
 
-The stop gate's escape valve:
+Any store write satisfies the gate — record a new lesson, or confirm a
+record that earned its keep this session (the block message lists the ids
+that were injected):
+
+```bash
+slate confirm storage mx-0f9ba4            # appends a success outcome
+slate confirm storage mx-0f9ba4 --status failure
+```
+
+Confirmations feed straight back into retrieval: each success outcome is a
+star that lifts the record in `slate prime`'s ranked index and boosts it in
+`slate search`. The gate's last escape valve:
 
 ```bash
 slate ack --no-lessons "pure refactor, nothing new learned"
@@ -150,6 +161,7 @@ lives and `slate prune` archives them (recoverably, with an audit banner).
 | `slate prime [domains] [--files ...] [--budget N] [--full]` | Emit agent context (index by default) |
 | `slate query <domain> [--id <id>] [--type ...]` | List records / fetch one in full |
 | `slate search "<query>"` | BM25 across domains (confirmation-boosted) |
+| `slate confirm <domain> <id> [--status s]` | Record that an existing record helped (or didn't) — feeds ranking |
 | `slate edit / delete / move` | Locked, race-safe record surgery |
 | `slate sync` | Validate, then commit **store paths only** — never your staged work |
 | `slate prune [--dry-run] [--hard]` | Archive stale records |

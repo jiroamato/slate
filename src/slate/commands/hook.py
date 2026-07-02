@@ -198,11 +198,18 @@ def _stop(payload: dict) -> int:
 
     state["stop_blocked"] = True
     sessions.save_state(state)
+    injected = list(dict.fromkeys(i for i in state.get("injected_ids") or [] if i))[:3]
+    ways = "Three" if injected else "Two"
     reason = (
         f"This session changed {files} file(s) / {lines} line(s) but recorded no lesson. "
-        "Two ways to finish: record one — "
+        f"{ways} ways to finish: record one — "
         "slate record <domain> --type <convention|pattern|failure|decision|reference|guide> ... "
         '— or acknowledge there was nothing to learn: slate ack --no-lessons "<reason>".'
     )
+    if injected:
+        reason += (
+            " Or confirm a record that helped this session: slate confirm <domain> <id> "
+            f"(injected this session: {', '.join(injected)})."
+        )
     print(json.dumps({"decision": "block", "reason": reason}))
     return 0
