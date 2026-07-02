@@ -36,27 +36,39 @@ def run(argv: list[str]) -> int:
         if not stale:
             continue
         keep = [r for r in records if r not in stale]
+        counts = {"stale": len(stale), "kept": len(keep)}
         if not args.dry_run:
-            if not args.hard:
-                for record in stale:
-                    record["status"] = "archived"
-                    record["archived_at"] = now_str
-                    record["archive_reason"] = "stale"
-                # Archive-then-rewrite: a crash between the two duplicates a
-                # record (doctor flags it) rather than losing it. Skipping ids
-                # already in the archive keeps re-runs after such a crash from
-                # duplicating archive entries.
-                archived, _ = store.read_archive(domain)
-                archived_ids = {r.get("id") for r in archived} - {None}
-                to_archive = [r for r in stale if r.get("id") not in archived_ids]
-                if to_archive:
-                    store.append_archive(domain, to_archive)
-            store.rewrite(domain, keep)
+
+            def apply(current: list[dict]) -> list[dict] | None:
+                # re-partition under the domain lock so concurrent appends survive
+                live_stale = [r for r in current if schema.is_stale(r, now, shelf_life)]
+                live_keep = [r for r in current if r not in live_stale]
+                counts["stale"] = len(live_stale)
+                counts["kept"] = len(live_keep)
+                if not live_stale:
+                    return None  # nothing to do — skip the rewrite
+                if not args.hard:
+                    for record in live_stale:
+                        record["status"] = "archived"
+                        record["archived_at"] = now_str
+                        record["archive_reason"] = "stale"
+                    # Archive-then-rewrite: a crash between the two duplicates
+                    # a record (doctor flags it) rather than losing it.
+                    # Skipping ids already archived keeps re-runs after such a
+                    # crash from duplicating archive entries.
+                    archived, _ = store.read_archive(domain)
+                    archived_ids = {r.get("id") for r in archived} - {None}
+                    to_archive = [r for r in live_stale if r.get("id") not in archived_ids]
+                    if to_archive:
+                        store.append_archive(domain, to_archive)
+                return live_keep
+
+            store.mutate(domain, apply)
         results.append(
             {
                 "domain": domain,
-                "stale": len(stale),
-                "kept": len(keep),
+                "stale": counts["stale"],
+                "kept": counts["kept"],
                 "action": "dry-run" if args.dry_run else ("deleted" if args.hard else "archived"),
             }
         )

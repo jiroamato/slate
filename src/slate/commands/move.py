@@ -17,7 +17,7 @@ def run(argv: list[str]) -> int:
 
     store = require_store()
     records = store.read_for_rewrite(args.source)
-    index, record = resolve_id(records, args.record_id, domain=args.source)
+    _, record = resolve_id(records, args.record_id, domain=args.source)
 
     # Incoming references from any domain (relates_to/supersedes) keep pointing
     # at the old domain-qualified id — surface them so the operator can fix up.
@@ -43,12 +43,18 @@ def run(argv: list[str]) -> int:
         )
         return 0
 
-    # Append to the target before rewriting the source: a crash in between
+    # Append to the target before removing from the source: a crash in between
     # duplicates the record across domains (visible, recoverable) instead of
     # deleting it — same never-lose ordering as prune's archive-then-rewrite.
     store.append(args.target, record)
-    del records[index]
-    store.rewrite(args.source, records)
+
+    def remove(current: list[dict]) -> list[dict]:
+        # re-resolve under the source lock so concurrent appends survive
+        idx, _ = resolve_id(current, rid, domain=args.source)
+        del current[idx]
+        return current
+
+    store.mutate(args.source, remove)
 
     lines = [f"Moved {rid} from {args.source} to {args.target}"]
     for ref in incoming:

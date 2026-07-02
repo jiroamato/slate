@@ -15,7 +15,7 @@ import time
 import traceback
 from pathlib import Path
 
-from slate.store import to_posix
+from slate.store import atomic_write, to_posix
 
 
 def slate_tmp_dir() -> Path:
@@ -48,9 +48,9 @@ def new_state(session_id: str) -> dict:
 
 
 def save_state(state: dict) -> None:
-    path = state_path(state["session_id"])
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(state, fh)
+    # atomic: parallel hook invocations read this file; a torn write would
+    # reset the session (spurious re-injection) via load_state's None fallback
+    atomic_write(state_path(state["session_id"]), json.dumps(state))
 
 
 def repo_key(store_root: Path) -> str:
@@ -64,8 +64,7 @@ def ack_path(store_root: Path) -> Path:
 
 def write_ack(store_root: Path, reason: str) -> dict:
     marker = {"ts": time.time(), "reason": reason}
-    with open(ack_path(store_root), "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(marker, fh)
+    atomic_write(ack_path(store_root), json.dumps(marker))
     return marker
 
 

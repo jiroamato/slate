@@ -29,47 +29,55 @@ def run(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     store = require_store()
-    records = store.read_for_rewrite(args.domain)
-    index, record = resolve_id(records, args.record_id, domain=args.domain)
-    updated = dict(record)
+    result: dict = {}
 
-    for flag in _FIELD_FLAGS:
-        value = getattr(args, flag)
-        if value is not None:
-            updated[flag] = value
-    if args.classification:
-        updated["classification"] = args.classification
-    for key, raw in (("files", args.files), ("tags", args.tags),
-                     ("relates_to", args.relates_to), ("supersedes", args.supersedes)):
-        if raw is not None:
-            updated[key] = csv_list(raw) or []
-            if not updated[key]:
-                updated.pop(key)
-    if args.dir_anchors is not None:
-        anchors = []
-        for raw in args.dir_anchors:
-            assert_writable_dir_anchor(raw)
-            normalized = normalize_dir_anchor(raw)
-            if normalized:
-                anchors.append(normalized)
-        updated["dir_anchors"] = anchors
-    evidence_updates = {
-        key: getattr(args, f"evidence_{key}")
-        for key in EVIDENCE_FLAGS
-        if getattr(args, f"evidence_{key}") is not None
-    }
-    if evidence_updates:
-        updated["evidence"] = {**(record.get("evidence") or {}), **evidence_updates}
+    def apply(records: list[dict]) -> list[dict]:
+        # runs under the domain lock (store.mutate) — resolve and merge against
+        # the current on-disk state so concurrent appends can't be dropped
+        index, record = resolve_id(records, args.record_id, domain=args.domain)
+        updated = dict(record)
 
-    errors = schema.validate_record(updated)
-    if errors:
-        raise SlateError(
-            "; ".join(errors),
-            hint="the edit would make the record invalid; nothing was written",
-        )
+        for flag in _FIELD_FLAGS:
+            value = getattr(args, flag)
+            if value is not None:
+                updated[flag] = value
+        if args.classification:
+            updated["classification"] = args.classification
+        for key, raw in (("files", args.files), ("tags", args.tags),
+                         ("relates_to", args.relates_to), ("supersedes", args.supersedes)):
+            if raw is not None:
+                updated[key] = csv_list(raw) or []
+                if not updated[key]:
+                    updated.pop(key)
+        if args.dir_anchors is not None:
+            anchors = []
+            for raw in args.dir_anchors:
+                assert_writable_dir_anchor(raw)
+                normalized = normalize_dir_anchor(raw)
+                if normalized:
+                    anchors.append(normalized)
+            updated["dir_anchors"] = anchors
+        evidence_updates = {
+            key: getattr(args, f"evidence_{key}")
+            for key in EVIDENCE_FLAGS
+            if getattr(args, f"evidence_{key}") is not None
+        }
+        if evidence_updates:
+            updated["evidence"] = {**(record.get("evidence") or {}), **evidence_updates}
 
-    records[index] = updated
-    store.rewrite(args.domain, records)
+        errors = schema.validate_record(updated)
+        if errors:
+            raise SlateError(
+                "; ".join(errors),
+                hint="the edit would make the record invalid; nothing was written",
+            )
+
+        records[index] = updated
+        result["record"] = updated
+        return records
+
+    store.mutate(args.domain, apply)
+    updated = result["record"]
     emit(
         {"domain": args.domain, "record": updated},
         json_mode=args.json,

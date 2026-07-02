@@ -146,6 +146,36 @@ class Store:
             )
         return records
 
+    def mutate(self, domain: str, fn):
+        """Locked read-modify-write for a domain file.
+
+        Reading inside the lock closes the read→rewrite race: a record
+        appended by another process just before the lock is taken is part of
+        the list `fn` sees, so it survives the rewrite. `fn` receives the
+        record list and returns the new list, or None to skip writing.
+        Refuses domains with unreadable lines (same rule as read_for_rewrite).
+        """
+        path = self.domain_path(domain)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock(path):
+            records, warnings = self._read_file(path)
+            if warnings:
+                raise SlateError(
+                    f"domain '{domain}' has {len(warnings)} unreadable line(s); "
+                    "rewriting would silently drop them",
+                    hint=warnings[0],
+                    retry="slate doctor",
+                )
+            new_records = fn(records)
+            if new_records is None:
+                return records
+            for record in new_records:
+                if not record.get("id"):
+                    record["id"] = schema.generate_id(record)
+            content = "".join(dumps_record(r) + "\n" for r in new_records)
+            atomic_write(path, content)
+            return new_records
+
     # --- writing ---
 
     def append(self, domain: str, record: dict) -> None:

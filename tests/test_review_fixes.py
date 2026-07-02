@@ -180,10 +180,10 @@ def test_move_crash_between_operations_never_loses_the_record(repo, monkeypatch,
     main(["record", "api", "--type", "convention", "--content", "precious lesson"])
     capsys.readouterr()
 
-    def exploding_rewrite(self, domain, records):
+    def exploding_mutate(self, domain, fn):
         raise RuntimeError("simulated crash mid-move")
 
-    monkeypatch.setattr(Store, "rewrite", exploding_rewrite)
+    monkeypatch.setattr(Store, "mutate", exploding_mutate)
     assert main(["move", "api", "mx-", "archive-domain"]) == 1  # unexpected error
     source = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
     target = (repo / ".slate" / "expertise" / "archive-domain.jsonl").read_text(encoding="utf-8")
@@ -234,6 +234,60 @@ def test_doctor_governance_uses_warn_entries_band(repo, capsys):
     path.write_text("".join(line % (i, i) for i in range(7)), encoding="utf-8")  # > hard (6)
     assert main(["doctor"]) == 1
     assert "hard limit" in capsys.readouterr().out
+
+
+def test_edit_does_not_drop_concurrently_appended_records(repo, monkeypatch, capsys):
+    # simulate another process appending between edit's read and its lock:
+    # the sneaky lock wrapper appends a record the moment the lock is taken,
+    # i.e. the last instant a competing writer could have won the race
+    import contextlib
+
+    from slate import store as store_mod
+
+    main(["record", "api", "--type", "convention", "--content", "record to edit"])
+    capsys.readouterr()
+    target_id = json.loads(
+        (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )["id"]
+    real_lock = store_mod.file_lock
+    concurrent = (
+        '{"type":"convention","content":"appended by a parallel subagent",'
+        '"classification":"tactical","recorded_at":"2026-07-01T12:30:00.000Z","id":"mx-race00"}\n'
+    )
+    state = {"injected": False}
+
+    @contextlib.contextmanager
+    def sneaky_lock(target):
+        if not state["injected"] and target.name == "api.jsonl":
+            state["injected"] = True
+            with open(target, "a", encoding="utf-8", newline="\n") as fh:
+                fh.write(concurrent)
+        with real_lock(target):
+            yield
+
+    monkeypatch.setattr(store_mod, "file_lock", sneaky_lock)
+    assert main(["edit", "api", target_id, "--content", "edited content"]) == 0
+    text = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
+    assert "appended by a parallel subagent" in text  # concurrent write survived
+    assert "edited content" in text
+
+
+def test_save_state_is_atomic(tmp_path, monkeypatch):
+    from slate import sessions
+    from slate import store as store_mod
+
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    original = sessions.new_state("atomic-session")
+    sessions.save_state(original)
+    before = sessions.state_path("atomic-session").read_text(encoding="utf-8")
+
+    def exploding_replace(src, dst):
+        raise KeyboardInterrupt("simulated interrupt mid-write")
+
+    monkeypatch.setattr(store_mod.os, "replace", exploding_replace)
+    with pytest.raises(KeyboardInterrupt):
+        sessions.save_state({**original, "seen_files": ["x.py"]})
+    assert sessions.state_path("atomic-session").read_text(encoding="utf-8") == before
 
 
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
