@@ -43,9 +43,12 @@ def run(argv: list[str]) -> int:
         )
         return 0
 
+    # Append to the target before rewriting the source: a crash in between
+    # duplicates the record across domains (visible, recoverable) instead of
+    # deleting it — same never-lose ordering as prune's archive-then-rewrite.
+    store.append(args.target, record)
     del records[index]
     store.rewrite(args.source, records)
-    store.append(args.target, record)
 
     lines = [f"Moved {rid} from {args.source} to {args.target}"]
     for ref in incoming:

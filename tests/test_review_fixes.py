@@ -172,6 +172,25 @@ def test_prune_dry_run_hard_says_delete(repo, monkeypatch, capsys):
     assert "would delete" in capsys.readouterr().out
 
 
+def test_move_crash_between_operations_never_loses_the_record(repo, monkeypatch, capsys):
+    # move = two operations on two files; if the second one dies, the record
+    # must exist *somewhere* (duplicated at worst, never deleted)
+    from slate.store import Store
+
+    main(["record", "api", "--type", "convention", "--content", "precious lesson"])
+    capsys.readouterr()
+
+    def exploding_rewrite(self, domain, records):
+        raise RuntimeError("simulated crash mid-move")
+
+    monkeypatch.setattr(Store, "rewrite", exploding_rewrite)
+    assert main(["move", "api", "mx-", "archive-domain"]) == 1  # unexpected error
+    source = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
+    target = (repo / ".slate" / "expertise" / "archive-domain.jsonl").read_text(encoding="utf-8")
+    assert "precious lesson" in source or "precious lesson" in target
+    assert "precious lesson" in target  # append-to-target must happen first
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")
