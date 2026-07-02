@@ -118,6 +118,25 @@ def test_session_start_compact_keeps_started_at_clears_lists_and_emits(
     assert after["injected_ids"] == []
 
 
+def test_session_start_compact_leaves_unknown_state_fields_alone(repo, monkeypatch, capsys):
+    # greptile PR #3: clearing every list-valued field would silently wipe
+    # future non-injection state (audit trails, suppression lists) on compact
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    hook(monkeypatch, "session-start", {"session_id": session}, capsys)
+    state = read_state(repo, session)
+    state["seen_files"] = ["src/store.py"]
+    state["future_audit_trail"] = ["compact@t1"]  # unknown list field: must survive
+    write_state(repo, state)
+
+    hook(monkeypatch, "session-start", {"session_id": session, "source": "compact"}, capsys)
+    after = read_state(repo, session)
+    assert after["future_audit_trail"] == ["compact@t1"]
+    assert after["seen_files"] == []  # only the injection-tracking lists clear
+    assert after["injected_ids"] == []
+
+
 def test_session_start_compact_without_state_behaves_like_startup(repo, monkeypatch, capsys):
     main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
     capsys.readouterr()

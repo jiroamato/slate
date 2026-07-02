@@ -70,13 +70,12 @@ def _session_start(payload: dict) -> int:
         return 0
 
     if source == "compact" and prior is not None:
-        # context was summarized away: clear the injection-tracking lists so
-        # records re-inject, but keep started_at (and the rest of the state)
-        # — the stop gate compares store mtimes against it, and a compact is
-        # mid-logical-session, not a new one
-        for key, value in prior.items():
-            if isinstance(value, list):
-                prior[key] = []
+        # context was summarized away: clear exactly the injection-tracking
+        # lists so records re-inject, but keep started_at (and every other
+        # field, known or not) — the stop gate compares store mtimes against
+        # started_at, and a compact is mid-logical-session, not a new one
+        prior["seen_files"] = []
+        prior["injected_ids"] = []
         sessions.save_state(prior)
     else:
         # startup / clear / unknown source, or no prior state to preserve
