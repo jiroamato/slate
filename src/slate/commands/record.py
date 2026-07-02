@@ -218,9 +218,12 @@ def run(argv: list[str]) -> int:
         )
         return 0
 
-    if args.force:
-        _log_force(store, args.domain, record, similar, score)
     store.append(args.domain, record)
+    if args.force:
+        try:
+            _log_force(store, args.domain, record, similar, score)
+        except OSError:
+            pass  # local telemetry must never block or undo the user's write
     emit(
         {"action": "created", "domain": args.domain, "record": record},
         json_mode=args.json,

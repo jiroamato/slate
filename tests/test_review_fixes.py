@@ -290,6 +290,24 @@ def test_save_state_is_atomic(tmp_path, monkeypatch):
     assert sessions.state_path("atomic-session").read_text(encoding="utf-8") == before
 
 
+def test_force_write_succeeds_even_if_force_log_fails(repo, monkeypatch, capsys):
+    from slate.commands import record as record_cmd
+
+    main(["record", "api", "--type", "convention", "--content",
+          "always run the pytest suite before committing changes"])
+    capsys.readouterr()
+
+    def exploding_log(*a, **kw):
+        raise OSError("cache dir unwritable")
+
+    monkeypatch.setattr(record_cmd, "_log_force", exploding_log)
+    code = main(["record", "api", "--type", "convention", "--content",
+                 "always run the pytest suite before you commit changes", "--force"])
+    assert code == 0  # telemetry failure must not block the write
+    text = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
+    assert "before you commit changes" in text
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")
