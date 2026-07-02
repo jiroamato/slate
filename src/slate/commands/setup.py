@@ -18,6 +18,7 @@ _HOOK_PREFIX = "slate hook"
 # (event, matcher, command)
 _HOOKS = (
     ("SessionStart", None, "slate hook session-start"),
+    ("UserPromptSubmit", None, "slate hook prompt"),
     ("PreToolUse", "Edit|Write", "slate hook pre-tool"),
     ("Stop", None, "slate hook stop"),
 )

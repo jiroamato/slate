@@ -131,6 +131,118 @@ def test_pre_tool_fast_path_avoids_yaml_import(repo, monkeypatch, capsys):
     assert "yaml" not in sys.modules
 
 
+# --- prompt (UserPromptSubmit retrieval) ---
+
+
+def test_prompt_injects_matching_index_lines(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    main(["record", "api", "--type", "convention",
+          "--content", "responses use problem+json errors"])
+    capsys.readouterr()
+    code, out = hook(
+        monkeypatch,
+        "prompt",
+        {"session_id": sid(), "prompt": "fix the atomic writes in the store"},
+        capsys,
+    )
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "<slate-memory>" in context
+    assert "atomic writes" in context
+    assert "slate query" in context
+    assert "problem+json" not in context  # non-matching record is not suggested
+
+
+def test_prompt_does_not_resuggest_across_prompts(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    _, first = hook(
+        monkeypatch, "prompt", {"session_id": session, "prompt": "atomic writes"}, capsys
+    )
+    assert "atomic writes" in json.loads(first)["hookSpecificOutput"]["additionalContext"]
+    _, second = hook(
+        monkeypatch, "prompt", {"session_id": session, "prompt": "atomic writes"}, capsys
+    )
+    assert second == ""
+
+
+def test_prompt_skips_ids_already_injected_by_pre_tool(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    edit = {
+        "session_id": session,
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "src" / "store.py")},
+    }
+    hook(monkeypatch, "pre-tool", edit, capsys)
+    code, out = hook(
+        monkeypatch, "prompt", {"session_id": session, "prompt": "atomic writes"}, capsys
+    )
+    assert code == 0
+    assert out == ""
+
+
+def test_prompt_empty_missing_or_unmatched_is_silent(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    for prompt in ("", "   ", "quantum flux capacitor"):
+        code, out = hook(monkeypatch, "prompt", {"session_id": sid(), "prompt": prompt}, capsys)
+        assert code == 0
+        assert out == ""
+    code, out = hook(monkeypatch, "prompt", {"session_id": sid()}, capsys)
+    assert code == 0
+    assert out == ""
+
+
+def test_prompt_without_store_is_silent(tmp_path, monkeypatch, capsys):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path / "tmp"))
+    code, out = hook(
+        monkeypatch, "prompt", {"session_id": sid(), "prompt": "atomic writes"}, capsys
+    )
+    assert code == 0
+    assert out == ""
+
+
+def test_prompt_caps_suggestions_at_five(repo, monkeypatch, capsys):
+    for i in range(7):
+        main(["record", f"d{i}", "--type", "convention",
+              "--content", f"retry backoff rule number {i}"])
+    capsys.readouterr()
+    code, out = hook(
+        monkeypatch,
+        "prompt",
+        {"session_id": sid(), "prompt": "retry backoff rule"},
+        capsys,
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert context.count("[mx-") == 5
+
+
+def test_prompt_tolerates_old_state_file_without_new_fields(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    old_state = {
+        "session_id": session,
+        "started_at": time.time(),
+        "seen_files": [],
+        "injected_ids": [],
+        "stop_blocked": False,
+    }
+    state_file = repo / "tmp" / "slate" / f"{session}.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(old_state), encoding="utf-8")
+    code, out = hook(
+        monkeypatch, "prompt", {"session_id": session, "prompt": "atomic writes"}, capsys
+    )
+    assert code == 0
+    assert "atomic writes" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert not (repo / "tmp" / "slate" / "hook-errors.log").exists()
+
+
 # --- stop gate ---
 
 

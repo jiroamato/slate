@@ -31,6 +31,7 @@ def test_setup_claude_installs_hooks_and_permissions(repo, capsys):
     assert "slate hook session-start" in hook_commands(cfg, "SessionStart")
     assert "slate hook pre-tool" in hook_commands(cfg, "PreToolUse")
     assert "slate hook stop" in hook_commands(cfg, "Stop")
+    assert "slate hook prompt" in hook_commands(cfg, "UserPromptSubmit")
     pre_entry = cfg["hooks"]["PreToolUse"][0]
     assert pre_entry["matcher"] == "Edit|Write"
     deny = cfg["permissions"]["deny"]
@@ -61,6 +62,7 @@ def test_setup_preserves_user_settings_and_is_idempotent(repo):
     stop_commands = hook_commands(cfg, "Stop")
     assert stop_commands.count("slate hook stop") == 1
     assert "my-own-hook" in stop_commands
+    assert hook_commands(cfg, "UserPromptSubmit").count("slate hook prompt") == 1
     assert cfg["permissions"]["deny"].count("Edit(.slate/expertise/**)") == 1
 
 
@@ -83,4 +85,5 @@ def test_setup_remove_is_surgical(repo):
     assert cfg["model"] == "opus"
     assert hook_commands(cfg, "Stop") == ["my-own-hook"]
     assert "SessionStart" not in cfg.get("hooks", {})
+    assert "UserPromptSubmit" not in cfg.get("hooks", {})
     assert cfg["permissions"]["deny"] == ["Read(secrets/**)"]

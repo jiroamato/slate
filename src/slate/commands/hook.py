@@ -40,6 +40,8 @@ def _dispatch(argv: list[str]) -> int:
         return _session_start(payload)
     if event == "pre-tool":
         return _pre_tool(payload)
+    if event == "prompt":
+        return _prompt(payload)
     if event == "stop":
         return _stop(payload)
     return 0
@@ -148,6 +150,67 @@ def _pre_tool(payload: dict) -> int:
         header = f"Records anchored to {rel}:\n\n"
         _emit("PreToolUse", priming.wrap_delimited(header + body))
     sessions.save_state(state)
+    return 0
+
+
+PROMPT_BUDGET = 600  # tokens — deliberately small; these are hints, not priming
+PROMPT_MAX_HITS = 5
+
+
+def _prompt(payload: dict) -> int:
+    """UserPromptSubmit: BM25-search the prompt text across all domains and
+    suggest the top index lines. Each record id is suggested at most once per
+    session, and never after its full record was already injected."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return 0
+    store = find_store()
+    if store is None:
+        return 0
+
+    from slate import search  # not needed on the pre-tool fast path
+
+    session_id = str(payload.get("session_id") or "unknown")
+    state = sessions.load_state(session_id) or sessions.new_state(session_id)
+    # setdefault: state files written before this field existed must still load
+    suggested = state.setdefault("prompt_suggested_ids", [])
+    already = set(state["injected_ids"]) | set(suggested)
+
+    corpus: list[dict] = []
+    domain_of: dict[int, str] = {}
+    for domain in store.domains():
+        records, _ = store.read(domain)
+        for record in records:
+            corpus.append(record)
+            domain_of[id(record)] = domain
+
+    header = (
+        "Possibly relevant recorded lessons for this request "
+        "(fetch: slate query <domain> --id <id>):\n\n"
+    )
+    used = priming.estimate_tokens(header)
+    lines: list[str] = []
+    picked: list[str] = []
+    for record, _score in search.search_records(corpus, prompt):
+        rid = record.get("id")
+        if not rid or rid in already:
+            continue  # id-less records can't be fetched by id — skip them
+        line = f"{domain_of[id(record)]}: {priming.index_line(record)}"
+        cost = priming.estimate_tokens(line)
+        if used + cost > PROMPT_BUDGET:
+            break
+        already.add(rid)
+        picked.append(rid)
+        lines.append(line)
+        used += cost
+        if len(lines) >= PROMPT_MAX_HITS:
+            break
+
+    if not lines:
+        return 0
+    suggested.extend(picked)
+    sessions.save_state(state)
+    _emit("UserPromptSubmit", priming.wrap_delimited(header + "\n".join(lines)))
     return 0
 
 
