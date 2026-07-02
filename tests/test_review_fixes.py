@@ -116,6 +116,29 @@ def test_prune_archives_stale_idless_record_even_when_archive_has_idless_entry(r
     assert (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8") == ""
 
 
+def test_pre_tool_injects_multiple_idless_records(repo, monkeypatch, capsys):
+    # two id-less records anchored to different files: injecting the first must
+    # not poison injected_ids with None and suppress the second
+    import io
+    import sys as _sys
+
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(repo / "tmp"))
+    (repo / ".slate" / "expertise" / "api.jsonl").write_text(
+        '{"type":"convention","content":"first anchored lesson","classification":"tactical",'
+        '"recorded_at":"2026-06-01T00:00:00.000Z","dir_anchors":["src/a"]}\n'
+        '{"type":"convention","content":"second anchored lesson","classification":"tactical",'
+        '"recorded_at":"2026-06-01T00:00:00.000Z","dir_anchors":["src/b"]}\n',
+        encoding="utf-8",
+    )
+    session = "idless-session"
+    for anchor, expected in (("src/a/x.py", "first anchored lesson"), ("src/b/y.py", "second anchored lesson")):
+        payload = {"session_id": session, "tool_input": {"file_path": str(repo / anchor)}}
+        monkeypatch.setattr(_sys, "stdin", io.StringIO(json.dumps(payload)))
+        assert main(["hook", "pre-tool"]) == 0
+        out = capsys.readouterr().out
+        assert expected in out, f"record anchored at {anchor} was not injected"
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")

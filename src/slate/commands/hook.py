@@ -131,14 +131,17 @@ def _pre_tool(payload: dict) -> int:
         hits = [
             r
             for r in records
-            if r.get("id") not in state["injected_ids"] and _matches(r, rel)
+            # id-less records dedup per-file via seen_files only — tracking
+            # them as None here would suppress every later id-less record
+            if (r.get("id") is None or r["id"] not in state["injected_ids"])
+            and _matches(r, rel)
         ]
         if hits:
             matched[domain] = hits
 
     if matched:
         for records in matched.values():
-            state["injected_ids"].extend(r.get("id") for r in records)
+            state["injected_ids"].extend(r["id"] for r in records if r.get("id"))
         body = priming.render_full(matched)
         header = f"Records anchored to {rel}:\n\n"
         _emit("PreToolUse", priming.wrap_delimited(header + body))
