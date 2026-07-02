@@ -62,14 +62,34 @@ def _emit(event_name: str, context: str) -> None:
 
 def _session_start(payload: dict) -> int:
     session_id = str(payload.get("session_id") or "unknown")
-    from slate import gitctx
+    source = payload.get("source")
+    prior = sessions.load_state(session_id) if source in ("resume", "compact") else None
+
+    if source == "resume" and prior is not None:
+        # conversation context is intact: keep the state untouched (a wipe
+        # would re-inject every anchored record) and emit nothing (the index
+        # is already in context)
+        return 0
 
     store = find_store()
-    # remember HEAD so the stop gate can count work committed mid-session;
-    # resolve it from the store's repo root — the same cwd _stop diffs in —
-    # so the SHA always belongs to the repo the gate later measures
-    start_head = gitctx.head_commit(store.root.parent if store else None)
-    sessions.save_state(sessions.new_state(session_id, start_head=start_head))
+    if source == "compact" and prior is not None:
+        # context was summarized away: clear exactly the injection-tracking
+        # lists so records re-inject, but keep started_at and start_head (and
+        # every other field, known or not) — the stop gate diffs against
+        # start_head and compares store mtimes against started_at, and a
+        # compact is mid-logical-session, not a new one
+        prior["seen_files"] = []
+        prior["injected_ids"] = []
+        sessions.save_state(prior)
+    else:
+        # startup / clear / unknown source, or no prior state to preserve
+        from slate import gitctx
+
+        # remember HEAD so the stop gate can count work committed mid-session;
+        # resolve it from the store's repo root — the same cwd _stop diffs in —
+        # so the SHA always belongs to the repo the gate later measures
+        start_head = gitctx.head_commit(store.root.parent if store else None)
+        sessions.save_state(sessions.new_state(session_id, start_head=start_head))
 
     if store is None:
         return 0
