@@ -117,6 +117,31 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def parse_iso(value: str | None) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def is_stale(record: dict, now: datetime, shelf_life: dict) -> bool:
+    """Mulch staleness rule: foundational never; tactical/observational stale
+    past their shelf-life (days since recorded_at)."""
+    classification = record.get("classification")
+    if classification not in ("tactical", "observational"):
+        return False
+    recorded = parse_iso(record.get("recorded_at"))
+    if recorded is None:
+        return False
+    age_days = (now - recorded).total_seconds() // 86400
+    return age_days > shelf_life.get(classification, 10**9)
+
+
 def generate_id(record: dict) -> str:
     type_def = TYPES.get(record.get("type", ""))
     id_value = record.get(type_def.id_key, "") if type_def else ""

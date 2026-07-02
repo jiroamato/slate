@@ -1,0 +1,58 @@
+"""slate prune — archive stale records (mulch classification+age rules)."""
+
+from __future__ import annotations
+
+from slate import schema
+from slate.commands._common import base_parser
+from slate.output import emit
+from slate.store import require_store
+
+
+def run(argv: list[str]) -> int:
+    parser = base_parser("prune", "Archive records past their shelf life.")
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    parser.add_argument("--hard", action="store_true", help="delete instead of archiving")
+    args = parser.parse_args(argv)
+
+    store = require_store()
+
+    from slate import config as config_mod
+
+    shelf_life = config_mod.load(store)["classification_defaults"]["shelf_life"]
+    now_str = schema.now_iso()
+    now = schema.parse_iso(now_str)
+
+    results = []
+    for domain in store.domains():
+        records, _ = store.read(domain)
+        stale = [r for r in records if schema.is_stale(r, now, shelf_life)]
+        if not stale:
+            continue
+        keep = [r for r in records if r not in stale]
+        if not args.dry_run:
+            if not args.hard:
+                for record in stale:
+                    record["status"] = "archived"
+                    record["archived_at"] = now_str
+                    record["archive_reason"] = "stale"
+                store.append_archive(domain, stale)
+            store.rewrite(domain, keep)
+        results.append(
+            {
+                "domain": domain,
+                "stale": len(stale),
+                "kept": len(keep),
+                "action": "dry-run" if args.dry_run else ("deleted" if args.hard else "archived"),
+            }
+        )
+
+    if args.json:
+        emit({"results": results}, json_mode=True, command="prune")
+        return 0
+    if not results:
+        print("nothing stale — no records pruned")
+        return 0
+    for row in results:
+        verb = {"dry-run": "would archive", "archived": "archived", "deleted": "deleted"}[row["action"]]
+        print(f"{row['domain']}: {verb} {row['stale']} stale record(s), {row['kept']} kept")
+    return 0
