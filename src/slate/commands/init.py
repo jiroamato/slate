@@ -23,7 +23,7 @@ classification_defaults:
     tactical: 14
     observational: 30
 dedup:
-  threshold: 4.0
+  threshold: 0.6
 enforcement:
   stop_gate:
     min_files: 3

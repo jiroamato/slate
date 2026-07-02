@@ -14,9 +14,12 @@ from typing import Any
 from slate.output import EXIT_USAGE, SlateError
 from slate.store import Store
 
-# Shipped default for dedup.threshold — tuned against the golden-store
-# fixture (see tests/test_record.py::test_default_threshold_separates).
-DEFAULT_DEDUP_THRESHOLD = 4.0
+# dedup.threshold is a normalized similarity in [0, 1]: the top BM25 score of
+# any existing record divided by the candidate's own self-score, which keeps
+# the gate stable across corpus sizes (raw BM25 collapses on tiny domains).
+# Shipped default tuned against the golden-store fixture
+# (tests/test_record.py::test_default_threshold_separates_near_dup_from_related).
+DEFAULT_DEDUP_THRESHOLD = 0.6
 
 DEFAULTS: dict[str, Any] = {
     "version": "1",
