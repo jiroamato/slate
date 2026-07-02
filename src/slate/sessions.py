@@ -45,7 +45,9 @@ def new_state(session_id: str, start_head: str | None = None) -> dict:
         "session_id": session_id,
         "started_at": time.time(),
         "seen_files": [],
+        "read_seen_files": [],
         "injected_ids": [],
+        "prompt_suggested_ids": [],
         "stop_blocked": False,
         "start_head": start_head,
     }

@@ -40,6 +40,8 @@ def _dispatch(argv: list[str]) -> int:
         return _session_start(payload)
     if event == "pre-tool":
         return _pre_tool(payload)
+    if event == "prompt":
+        return _prompt(payload)
     if event == "stop":
         return _stop(payload)
     return 0
@@ -129,6 +131,8 @@ def _pre_tool(payload: dict) -> int:
     state = sessions.load_state(session_id) or sessions.new_state(session_id)
 
     rel = _relative_to_repo(str(file_path), store.root.parent)
+    if str(payload.get("tool_name") or "") == "Read":
+        return _pre_tool_read(store, state, rel)
     if rel in state["seen_files"]:
         return 0
     state["seen_files"].append(rel)
@@ -154,6 +158,117 @@ def _pre_tool(payload: dict) -> int:
         header = f"Records anchored to {rel}:\n\n"
         _emit("PreToolUse", priming.wrap_delimited(header + body))
     sessions.save_state(state)
+    return 0
+
+
+READ_BUDGET = 600  # tokens — index hints only; the first edit injects records in full
+READ_MAX_HITS = 10
+
+
+def _pre_tool_read(store, state: dict, rel: str) -> int:
+    """Read of an anchored file: inject index lines only, once per file.
+    Deliberately does NOT touch seen_files/injected_ids — a later Edit of the
+    same file must still inject the full records."""
+    # setdefault: state files written before this field existed must still load
+    read_seen = state.setdefault("read_seen_files", [])
+    if rel in read_seen or rel in state["seen_files"]:
+        return 0  # already read-injected, or the full records already went in
+    read_seen.append(rel)
+
+    matched: list[tuple[str, dict]] = []
+    for domain in store.domains():
+        records, _ = store.read(domain)
+        matched.extend(
+            (domain, r)
+            for r in records
+            if (r.get("id") is None or r["id"] not in state["injected_ids"])
+            and _matches(r, rel)
+        )
+    if matched:
+        # best records first, capped like the prompt hook — an anchor-heavy
+        # file must not blow a hole in the context window
+        order = {id(r): i for i, r in enumerate(priming.rank([r for _, r in matched]))}
+        matched.sort(key=lambda pair: order[id(pair[1])])
+        header = (
+            f"Recorded lessons anchored to {rel} — index only, full records "
+            "inject on first edit (fetch now: slate query <domain> --id <id>):\n\n"
+        )
+        used = priming.estimate_tokens(header)
+        lines: list[str] = []
+        omitted = 0
+        for domain, record in matched:
+            line = f"{domain}: {priming.index_line(record)}"
+            cost = priming.estimate_tokens(line)
+            if len(lines) >= READ_MAX_HITS or used + cost > READ_BUDGET:
+                omitted += 1
+                continue
+            lines.append(line)
+            used += cost
+        if omitted:
+            lines.append(f"…{omitted} more — the first edit injects the full set")
+        _emit("PreToolUse", priming.wrap_delimited(header + "\n".join(lines)))
+    sessions.save_state(state)
+    return 0
+
+
+PROMPT_BUDGET = 600  # tokens — deliberately small; these are hints, not priming
+PROMPT_MAX_HITS = 5
+
+
+def _prompt(payload: dict) -> int:
+    """UserPromptSubmit: BM25-search the prompt text across all domains and
+    suggest the top index lines. Each record id is suggested at most once per
+    session, and never after its full record was already injected."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return 0
+    store = find_store()
+    if store is None:
+        return 0
+
+    from slate import search  # not needed on the pre-tool fast path
+
+    session_id = str(payload.get("session_id") or "unknown")
+    state = sessions.load_state(session_id) or sessions.new_state(session_id)
+    # setdefault: state files written before this field existed must still load
+    suggested = state.setdefault("prompt_suggested_ids", [])
+    already = set(state["injected_ids"]) | set(suggested)
+
+    corpus: list[dict] = []
+    domain_of: dict[int, str] = {}
+    for domain in store.domains():
+        records, _ = store.read(domain)
+        for record in records:
+            corpus.append(record)
+            domain_of[id(record)] = domain
+
+    header = (
+        "Possibly relevant recorded lessons for this request "
+        "(fetch: slate query <domain> --id <id>):\n\n"
+    )
+    used = priming.estimate_tokens(header)
+    lines: list[str] = []
+    picked: list[str] = []
+    for record, _score in search.search_records(corpus, prompt):
+        rid = record.get("id")
+        if not rid or rid in already:
+            continue  # id-less records can't be fetched by id — skip them
+        line = f"{domain_of[id(record)]}: {priming.index_line(record)}"
+        cost = priming.estimate_tokens(line)
+        if used + cost > PROMPT_BUDGET:
+            continue  # oversize line — a shorter lower-ranked hit may still fit
+        already.add(rid)
+        picked.append(rid)
+        lines.append(line)
+        used += cost
+        if len(lines) >= PROMPT_MAX_HITS:
+            break
+
+    if not lines:
+        return 0
+    suggested.extend(picked)
+    sessions.save_state(state)
+    _emit("UserPromptSubmit", priming.wrap_delimited(header + "\n".join(lines)))
     return 0
 
 

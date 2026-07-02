@@ -106,7 +106,8 @@ holds whether the domain has 2 records or 200. `--force` writes are logged;
 | Hook | Behavior |
 |---|---|
 | SessionStart | Injects the budget-capped index, wrapped in delimiters with a background-reference header (prompt-injection mitigation) |
-| PreToolUse (Edit\|Write) | First touch of a file matching a record's `files`/`dir_anchors` injects those records in full — once per file per session |
+| UserPromptSubmit | BM25-searches the prompt text across all domains and injects the top matching index lines (≤5, small token budget) — each record suggested at most once per session, never after its full record was injected |
+| PreToolUse (Edit\|Write\|Read) | First Edit/Write of a file matching a record's `files`/`dir_anchors` injects those records in full — once per file per session. First Read of an anchored file injects index lines only, without consuming the full injection: a later edit still gets the full records |
 | Stop | Blocks turn-end **at most once** when the session changed ≥3 files or ≥40 lines with no store write and no ack |
 | Permissions | Denies direct Edit/Write on `.slate/expertise/*.jsonl` — the CLI (validation + dedup gate) is the only write path |
 
