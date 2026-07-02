@@ -169,6 +169,31 @@ class Store:
         return newest
 
 
+def resolve_id(records: list[dict], identifier: str, *, domain: str = "") -> tuple[int, dict]:
+    """Resolve mx-abc123 / abc123 / unique prefix to (index, record)."""
+    hash_part = identifier[3:] if identifier.startswith("mx-") else identifier
+    target = f"mx-{hash_part}"
+    for index, record in enumerate(records):
+        if record.get("id") == target:
+            return index, record
+    matches = [(i, r) for i, r in enumerate(records) if (r.get("id") or "").startswith(target)]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        ids = ", ".join(r.get("id", "?") for _, r in matches)
+        raise SlateError(
+            f"ambiguous identifier '{identifier}' matches {len(matches)} records: {ids}",
+            code="ambiguous_id",
+            hint="use more characters to disambiguate",
+        )
+    raise SlateError(
+        f"record '{identifier}' not found" + (f" in domain '{domain}'" if domain else ""),
+        code="not_found",
+        hint="list records to see valid ids",
+        retry=f"slate query {domain}".strip(),
+    )
+
+
 def find_store(start: Path | None = None) -> Store | None:
     """Walk up from start (default cwd) to the git root, preferring .slate/ over .mulch/."""
     current = (start or Path.cwd()).resolve()
