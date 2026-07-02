@@ -144,7 +144,14 @@ def is_stale(record: dict, now: datetime, shelf_life: dict) -> bool:
 
 def generate_id(record: dict) -> str:
     type_def = TYPES.get(record.get("type", ""))
-    id_value = record.get(type_def.id_key, "") if type_def else ""
+    if type_def is not None:
+        id_value = record.get(type_def.id_key, "")
+    else:
+        # Unknown type (tolerant reader): no id_key exists, so hash the whole
+        # record canonically — distinct records must not collide on "<type>:".
+        import json
+
+        id_value = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     key = f"{record.get('type', '')}:{id_value}"
     return "mx-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:6]
 

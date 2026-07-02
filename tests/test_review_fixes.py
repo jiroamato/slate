@@ -139,6 +139,30 @@ def test_pre_tool_injects_multiple_idless_records(repo, monkeypatch, capsys):
         assert expected in out, f"record anchored at {anchor} was not injected"
 
 
+def test_rewrite_assigns_distinct_ids_to_idless_unknown_records(tmp_path):
+    from slate.store import Store
+
+    root = tmp_path / ".slate"
+    (root / "expertise").mkdir(parents=True)
+    store = Store(root, "slate")
+    records = [
+        {"type": "benchmark", "metric": "reads", "value": 100},
+        {"type": "benchmark", "metric": "writes", "value": 7},
+    ]
+    store.rewrite("perf", records)
+    ids = [r["id"] for r in records]
+    assert len(set(ids)) == 2, f"distinct unknown-type records collided on id: {ids}"
+    assert all(i.startswith("mx-") for i in ids)
+
+
+def test_unknown_type_id_generation_is_deterministic():
+    from slate import schema
+
+    record = {"type": "benchmark", "metric": "reads", "value": 100}
+    same = {"value": 100, "metric": "reads", "type": "benchmark"}  # key order differs
+    assert schema.generate_id(record) == schema.generate_id(same)
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")
