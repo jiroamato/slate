@@ -50,6 +50,109 @@ def test_session_start_injects_index_and_writes_state(repo, monkeypatch, capsys)
     assert state["started_at"] > 0
 
 
+def read_state(repo, session):
+    return json.loads((repo / "tmp" / "slate" / f"{session}.json").read_text(encoding="utf-8"))
+
+
+def write_state(repo, state):
+    path = repo / "tmp" / "slate" / f"{state['session_id']}.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_session_start_resume_preserves_state_and_is_silent(repo, monkeypatch, capsys):
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    hook(monkeypatch, "session-start", {"session_id": session}, capsys)
+    state = read_state(repo, session)
+    state["seen_files"] = ["src/store.py"]
+    state["injected_ids"] = ["mx-abc123"]
+    write_state(repo, state)
+
+    code, out = hook(
+        monkeypatch, "session-start", {"session_id": session, "source": "resume"}, capsys
+    )
+    assert code == 0
+    assert out == ""  # context is intact — nothing to re-inject
+    after = read_state(repo, session)
+    assert after == state  # no wipe: seen_files/injected_ids/started_at untouched
+
+
+def test_session_start_resume_without_state_behaves_like_startup(repo, monkeypatch, capsys):
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    code, out = hook(
+        monkeypatch, "session-start", {"session_id": session, "source": "resume"}, capsys
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "use uv for everything" in context
+    state = read_state(repo, session)
+    assert state["started_at"] > 0
+
+
+def test_session_start_compact_keeps_started_at_clears_lists_and_emits(
+    repo, monkeypatch, capsys
+):
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    hook(monkeypatch, "session-start", {"session_id": session}, capsys)
+    state = read_state(repo, session)
+    state["started_at"] = 12345.678  # sentinel: must survive compact
+    state["seen_files"] = ["src/store.py"]
+    state["injected_ids"] = ["mx-abc123"]
+    write_state(repo, state)
+
+    code, out = hook(
+        monkeypatch, "session-start", {"session_id": session, "source": "compact"}, capsys
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "use uv for everything" in context  # context was lost — re-emit index
+    after = read_state(repo, session)
+    assert after["session_id"] == session
+    assert after["started_at"] == 12345.678  # stop gate still spans the logical session
+    assert after["seen_files"] == []  # anchored records may re-inject
+    assert after["injected_ids"] == []
+
+
+def test_session_start_compact_without_state_behaves_like_startup(repo, monkeypatch, capsys):
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    code, out = hook(
+        monkeypatch, "session-start", {"session_id": session, "source": "compact"}, capsys
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "use uv for everything" in context
+    state = read_state(repo, session)
+    assert state["started_at"] > 0
+
+
+def test_session_start_clear_resets_state_and_emits_index(repo, monkeypatch, capsys):
+    main(["record", "api", "--type", "convention", "--content", "use uv for everything"])
+    capsys.readouterr()
+    session = sid()
+    hook(monkeypatch, "session-start", {"session_id": session}, capsys)
+    state = read_state(repo, session)
+    state["started_at"] = 12345.678
+    state["seen_files"] = ["src/store.py"]
+    write_state(repo, state)
+
+    code, out = hook(
+        monkeypatch, "session-start", {"session_id": session, "source": "clear"}, capsys
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "use uv for everything" in context
+    after = read_state(repo, session)
+    assert after["started_at"] != 12345.678  # fresh state, same as startup
+    assert after["seen_files"] == []
+
+
 def test_session_start_without_store_is_silent(tmp_path, monkeypatch, capsys):
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)

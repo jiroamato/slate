@@ -60,7 +60,27 @@ def _emit(event_name: str, context: str) -> None:
 
 def _session_start(payload: dict) -> int:
     session_id = str(payload.get("session_id") or "unknown")
-    sessions.save_state(sessions.new_state(session_id))
+    source = payload.get("source")
+    prior = sessions.load_state(session_id) if source in ("resume", "compact") else None
+
+    if source == "resume" and prior is not None:
+        # conversation context is intact: keep the state untouched (a wipe
+        # would re-inject every anchored record) and emit nothing (the index
+        # is already in context)
+        return 0
+
+    if source == "compact" and prior is not None:
+        # context was summarized away: clear the injection-tracking lists so
+        # records re-inject, but keep started_at (and the rest of the state)
+        # — the stop gate compares store mtimes against it, and a compact is
+        # mid-logical-session, not a new one
+        for key, value in prior.items():
+            if isinstance(value, list):
+                prior[key] = []
+        sessions.save_state(prior)
+    else:
+        # startup / clear / unknown source, or no prior state to preserve
+        sessions.save_state(sessions.new_state(session_id))
 
     store = find_store()
     if store is None:
