@@ -46,6 +46,28 @@ def test_stale_lock_is_cleaned_and_acquired(tmp_path):
     assert not stale.exists()
 
 
+def test_steal_stale_removes_only_stale_locks(tmp_path):
+    lock = tmp_path / "data.jsonl.lock"
+    lock.touch()
+    old = time.time() - 31
+    os.utime(lock, (old, old))
+    locks._steal_stale_lock(lock)
+    assert not lock.exists()
+    locks._steal_stale_lock(lock)  # second contender: silent no-op
+    assert list(tmp_path.iterdir()) == []  # no .stale-* debris left behind
+
+
+def test_steal_restores_a_live_lock_grabbed_by_mistake(tmp_path):
+    # the TOCTOU hazard: between a contender's staleness check and its steal,
+    # the stale lock was released and a *fresh* one created. The steal must
+    # detect the fresh mtime and put the lock back instead of deleting it.
+    lock = tmp_path / "data.jsonl.lock"
+    lock.touch()  # fresh mtime — a live holder's lock
+    locks._steal_stale_lock(lock)
+    assert lock.exists()  # live lock survives the mistaken steal
+    assert [p.name for p in tmp_path.iterdir()] == ["data.jsonl.lock"]
+
+
 def test_default_protocol_constants():
     assert locks.LOCK_RETRY_INTERVAL_MS == 50
     assert locks.LOCK_TIMEOUT_MS == 5000

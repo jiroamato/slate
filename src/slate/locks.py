@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -33,6 +34,37 @@ def _is_stale(lock_path: Path) -> bool:
     return age_ms > LOCK_STALE_MS
 
 
+def _steal_stale_lock(lock_path: Path) -> None:
+    """Remove a stale lock without the unlink race.
+
+    A bare unlink lets two contenders that both judged the lock stale delete
+    each other's freshly created replacement, breaking mutual exclusion.
+    Instead: atomically rename the lock to a unique name (exactly one
+    contender wins; rename preserves mtime), re-check staleness on the stolen
+    file, and if it turns out to be live — the holder swapped it in between
+    our check and the rename — restore it with a no-clobber link.
+    """
+    doomed = lock_path.with_name(f"{lock_path.name}.stale-{uuid.uuid4().hex[:8]}")
+    try:
+        os.rename(lock_path, doomed)
+    except OSError:
+        return  # another contender won the steal, or the lock vanished
+    if _is_stale(doomed):
+        try:
+            doomed.unlink()
+        except OSError:
+            pass
+        return
+    try:
+        os.link(doomed, lock_path)  # fails if a newer lock already exists
+    except OSError:
+        pass
+    try:
+        doomed.unlink()
+    except OSError:
+        pass
+
+
 @contextmanager
 def file_lock(target: Path):
     lock_path = Path(f"{target}.lock")
@@ -44,10 +76,7 @@ def file_lock(target: Path):
             break
         except FileExistsError:
             if _is_stale(lock_path):
-                try:
-                    lock_path.unlink()
-                except OSError:
-                    pass  # another process beat us to the cleanup
+                _steal_stale_lock(lock_path)
                 continue
             if time.monotonic() >= deadline:
                 raise LockTimeout(lock_path) from None
