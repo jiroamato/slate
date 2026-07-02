@@ -163,6 +163,15 @@ def test_unknown_type_id_generation_is_deterministic():
     assert schema.generate_id(record) == schema.generate_id(same)
 
 
+def test_prune_dry_run_hard_says_delete(repo, monkeypatch, capsys):
+    main(["record", "api", "--type", "convention", "--content", "old note",
+          "--classification", "observational"])
+    monkeypatch.setenv("SLATE_NOW", "2026-09-01T12:00:00.000Z")
+    capsys.readouterr()
+    assert main(["prune", "--dry-run", "--hard"]) == 0
+    assert "would delete" in capsys.readouterr().out
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")

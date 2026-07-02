@@ -71,6 +71,10 @@ def run(argv: list[str]) -> int:
         if row["action"] == "skipped":
             print(f"{row['domain']}: skipped ({row['reason']})")
             continue
-        verb = {"dry-run": "would archive", "archived": "archived", "deleted": "deleted"}[row["action"]]
+        verb = {
+            "dry-run": "would delete" if args.hard else "would archive",
+            "archived": "archived",
+            "deleted": "deleted",
+        }[row["action"]]
         print(f"{row['domain']}: {verb} {row['stale']} stale record(s), {row['kept']} kept")
     return 0
