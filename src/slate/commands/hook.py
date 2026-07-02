@@ -98,13 +98,15 @@ def _relative_to_repo(file_path: str, repo_root: Path) -> str:
 
 
 def _matches(record: dict, rel_path: str) -> bool:
+    # case-insensitive on both axes: CI targets macOS/Windows, whose
+    # filesystems don't distinguish Src/Utils from src/utils
     rel = rel_path.lower()
     for record_file in record.get("files") or []:
         f = to_posix(record_file).lower()
         if rel == f or rel.endswith("/" + f) or f.endswith("/" + rel):
             return True
     for anchor in record.get("dir_anchors") or []:
-        if file_lives_under_dir(rel_path, anchor):
+        if file_lives_under_dir(rel, anchor.lower()):
             return True
     return False
 

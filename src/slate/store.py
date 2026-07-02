@@ -187,17 +187,6 @@ class Store:
             with open(path, "a", encoding="utf-8", newline="\n") as fh:
                 fh.write(dumps_record(record) + "\n")
 
-    def rewrite(self, domain: str, records: list[dict]) -> None:
-        """Locked whole-file rewrite (edit/delete/move/prune)."""
-        for record in records:
-            if not record.get("id"):
-                record["id"] = schema.generate_id(record)
-        path = self.domain_path(domain)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        content = "".join(dumps_record(r) + "\n" for r in records)
-        with file_lock(path):
-            atomic_write(path, content)
-
     def append_archive(self, domain: str, records: list[dict]) -> None:
         path = self.archive_path(domain)
         path.parent.mkdir(parents=True, exist_ok=True)

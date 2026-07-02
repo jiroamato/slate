@@ -110,10 +110,10 @@ def test_append_preserves_existing_id(tmp_path):
 # --- rewriting ---
 
 
-def test_rewrite_replaces_contents_atomically(tmp_path):
+def test_mutate_replaces_contents_atomically(tmp_path):
     store = make_store(tmp_path)
     store.append("api", {"type": "convention", "content": "old", "classification": "tactical", "recorded_at": "t"})
-    store.rewrite("api", [{"type": "convention", "content": "new", "classification": "tactical", "recorded_at": "t"}])
+    store.mutate("api", lambda _: [{"type": "convention", "content": "new", "classification": "tactical", "recorded_at": "t"}])
     records, _ = store.read("api")
     assert len(records) == 1
     assert records[0]["content"] == "new"
@@ -122,11 +122,26 @@ def test_rewrite_replaces_contents_atomically(tmp_path):
     assert leftovers == []
 
 
-def test_rewrite_empty_writes_empty_file(tmp_path):
+def test_mutate_sees_current_records_and_can_empty_the_file(tmp_path):
     store = make_store(tmp_path)
     store.append("api", {"type": "convention", "content": "x", "classification": "tactical", "recorded_at": "t"})
-    store.rewrite("api", [])
+    seen: list[list[dict]] = []
+
+    def clear(records):
+        seen.append(list(records))
+        return []
+
+    store.mutate("api", clear)
+    assert len(seen[0]) == 1  # fn received the on-disk records
     assert store.domain_path("api").read_bytes() == b""
+
+
+def test_mutate_returning_none_skips_the_write(tmp_path):
+    store = make_store(tmp_path)
+    store.append("api", {"type": "convention", "content": "x", "classification": "tactical", "recorded_at": "t"})
+    before = store.domain_path("api").read_bytes()
+    store.mutate("api", lambda records: None)
+    assert store.domain_path("api").read_bytes() == before
 
 
 # --- archive ---

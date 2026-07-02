@@ -17,7 +17,7 @@ def _matches_files(record: dict, files: list[str]) -> bool:
         w = to_posix(wanted).lower()
         if any(w in f.lower() or f.lower() in w for f in record_files):
             return True
-        if any(file_lives_under_dir(to_posix(wanted), a) for a in anchors):
+        if any(file_lives_under_dir(w, a.lower()) for a in anchors):
             return True
     return False
 

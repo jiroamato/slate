@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from slate.commands._common import base_parser
-from slate.output import emit
+from slate.output import SlateError, emit
 from slate.store import require_store, resolve_id
 
 
@@ -14,6 +14,13 @@ def run(argv: list[str]) -> int:
     parser.add_argument("target")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     args = parser.parse_args(argv)
+
+    if args.source == args.target:
+        raise SlateError(
+            "source and target are the same domain",
+            code="usage",
+            hint="pick a different target domain",
+        )
 
     store = require_store()
     records = store.read_for_rewrite(args.source)
@@ -43,18 +50,22 @@ def run(argv: list[str]) -> int:
         )
         return 0
 
-    # Append to the target before removing from the source: a crash in between
-    # duplicates the record across domains (visible, recoverable) instead of
-    # deleting it — same never-lose ordering as prune's archive-then-rewrite.
-    store.append(args.target, record)
+    # The whole transfer runs under the source lock: the record appended to
+    # the target is re-resolved from current disk state (a concurrent edit
+    # isn't discarded), and appending before the source rewrite means a crash
+    # in between duplicates the record across domains (visible, recoverable)
+    # instead of deleting it — same never-lose ordering as prune.
+    moved: dict = {}
 
-    def remove(current: list[dict]) -> list[dict]:
-        # re-resolve under the source lock so concurrent appends survive
-        idx, _ = resolve_id(current, rid, domain=args.source)
+    def transfer(current: list[dict]) -> list[dict]:
+        idx, current_record = resolve_id(current, rid, domain=args.source)
+        store.append(args.target, current_record)  # target lock nests inside source lock
+        moved["record"] = current_record
         del current[idx]
         return current
 
-    store.mutate(args.source, remove)
+    store.mutate(args.source, transfer)
+    record = moved["record"]
 
     lines = [f"Moved {rid} from {args.source} to {args.target}"]
     for ref in incoming:

@@ -149,7 +149,7 @@ def test_rewrite_assigns_distinct_ids_to_idless_unknown_records(tmp_path):
         {"type": "benchmark", "metric": "reads", "value": 100},
         {"type": "benchmark", "metric": "writes", "value": 7},
     ]
-    store.rewrite("perf", records)
+    store.mutate("perf", lambda _: records)
     ids = [r["id"] for r in records]
     assert len(set(ids)) == 2, f"distinct unknown-type records collided on id: {ids}"
     assert all(i.startswith("mx-") for i in ids)
@@ -173,17 +173,17 @@ def test_prune_dry_run_hard_says_delete(repo, monkeypatch, capsys):
 
 
 def test_move_crash_between_operations_never_loses_the_record(repo, monkeypatch, capsys):
-    # move = two operations on two files; if the second one dies, the record
-    # must exist *somewhere* (duplicated at worst, never deleted)
-    from slate.store import Store
+    # move = target append + source rewrite; if the source rewrite dies after
+    # the append, the record must exist *somewhere* (duplicated, never deleted)
+    from slate import store as store_mod
 
     main(["record", "api", "--type", "convention", "--content", "precious lesson"])
     capsys.readouterr()
 
-    def exploding_mutate(self, domain, fn):
+    def exploding_atomic_write(path, content):
         raise RuntimeError("simulated crash mid-move")
 
-    monkeypatch.setattr(Store, "mutate", exploding_mutate)
+    monkeypatch.setattr(store_mod, "atomic_write", exploding_atomic_write)
     assert main(["move", "api", "mx-", "archive-domain"]) == 1  # unexpected error
     source = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
     target = (repo / ".slate" / "expertise" / "archive-domain.jsonl").read_text(encoding="utf-8")
@@ -306,6 +306,63 @@ def test_force_write_succeeds_even_if_force_log_fails(repo, monkeypatch, capsys)
     assert code == 0  # telemetry failure must not block the write
     text = (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8")
     assert "before you commit changes" in text
+
+
+def test_pre_tool_dir_anchor_matching_is_case_insensitive(repo, monkeypatch, capsys):
+    # files matching lowercases both sides; anchors must too, or a mixed-case
+    # anchor never fires on the case-insensitive filesystems CI targets
+    import io
+    import sys as _sys
+
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(repo / "tmp"))
+    (repo / ".slate" / "expertise" / "api.jsonl").write_text(
+        '{"type":"convention","content":"mixed case anchor lesson","classification":"tactical",'
+        '"recorded_at":"2026-06-01T00:00:00.000Z","dir_anchors":["Src/Utils"],"id":"mx-case01"}\n',
+        encoding="utf-8",
+    )
+    payload = {"session_id": "case-session", "tool_input": {"file_path": str(repo / "src" / "utils" / "db.py")}}
+    monkeypatch.setattr(_sys, "stdin", io.StringIO(json.dumps(payload)))
+    assert main(["hook", "pre-tool"]) == 0
+    out = capsys.readouterr().out
+    assert "mixed case anchor lesson" in out
+
+
+def test_move_transfers_the_current_record_not_a_stale_snapshot(repo, monkeypatch, capsys):
+    # a concurrent edit landing just before move's lock must be what arrives
+    # in the target domain — not move's pre-lock snapshot
+    import contextlib
+
+    from slate import store as store_mod
+
+    main(["record", "api", "--type", "convention", "--content", "original wording"])
+    capsys.readouterr()
+    source_path = repo / ".slate" / "expertise" / "api.jsonl"
+    rid = json.loads(source_path.read_text(encoding="utf-8").splitlines()[0])["id"]
+
+    real_lock = store_mod.file_lock
+    state = {"edited": False}
+
+    @contextlib.contextmanager
+    def sneaky_lock(target):
+        if not state["edited"] and target.name == "api.jsonl":
+            state["edited"] = True
+            record = json.loads(source_path.read_text(encoding="utf-8").splitlines()[0])
+            record["content"] = "edited concurrently"
+            source_path.write_text(json.dumps(record, separators=(",", ":")) + "\n", encoding="utf-8")
+        with real_lock(target):
+            yield
+
+    monkeypatch.setattr(store_mod, "file_lock", sneaky_lock)
+    assert main(["move", "api", rid, "storage"]) == 0
+    target_text = (repo / ".slate" / "expertise" / "storage.jsonl").read_text(encoding="utf-8")
+    assert "edited concurrently" in target_text
+    assert "original wording" not in target_text
+
+
+def test_move_rejects_same_source_and_target(repo, capsys):
+    main(["record", "api", "--type", "convention", "--content", "some record"])
+    capsys.readouterr()
+    assert main(["move", "api", "mx-", "api"]) == 2
 
 
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
