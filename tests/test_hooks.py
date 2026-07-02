@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -252,6 +253,25 @@ def test_session_start_records_start_head(stop_repo, monkeypatch, capsys):
     ).stdout.strip()
     state = json.loads(state_file(stop_repo, session).read_text(encoding="utf-8"))
     assert state["start_head"] == head
+
+
+def test_session_start_resolves_head_from_store_repo(stop_repo, monkeypatch, capsys):
+    # start_head must be resolved from the store's repo root — the same cwd
+    # _stop passes to diff_stats — not from the ambient process cwd, so the
+    # recorded SHA always belongs to the repo the stop gate later diffs
+    from slate import gitctx
+
+    seen = {}
+    real = gitctx.head_commit
+
+    def spy(cwd=None):
+        seen["cwd"] = cwd
+        return real(cwd)
+
+    monkeypatch.setattr(gitctx, "head_commit", spy)
+    start_session(monkeypatch, capsys)
+    assert seen["cwd"] is not None
+    assert Path(seen["cwd"]).resolve() == stop_repo.resolve()
 
 
 def test_stop_blocks_when_changes_committed_during_session(stop_repo, monkeypatch, capsys):

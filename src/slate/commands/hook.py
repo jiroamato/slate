@@ -62,10 +62,13 @@ def _session_start(payload: dict) -> int:
     session_id = str(payload.get("session_id") or "unknown")
     from slate import gitctx
 
-    # remember HEAD so the stop gate can count work committed mid-session
-    sessions.save_state(sessions.new_state(session_id, start_head=gitctx.head_commit()))
-
     store = find_store()
+    # remember HEAD so the stop gate can count work committed mid-session;
+    # resolve it from the store's repo root — the same cwd _stop diffs in —
+    # so the SHA always belongs to the repo the gate later measures
+    start_head = gitctx.head_commit(store.root.parent if store else None)
+    sessions.save_state(sessions.new_state(session_id, start_head=start_head))
+
     if store is None:
         return 0
     domain_records: dict[str, list[dict]] = {}
