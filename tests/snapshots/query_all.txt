@@ -1,0 +1,15 @@
+## api (5 records)
+[mx-f9ed1c] pattern: atomic writes (files: src/store.py +1)
+[mx-055788] decision: argparse over click
+[mx-8e5add] reference: mulch upstream (files: docs/design.md)
+[mx-c8156e] convention: http handlers return typed envelopes, never raw dicts
+[mx-9a1b2c] benchmark: jsonl read throughput
+
+## corrupt (1 records)
+[mx-00fine] convention: this line is fine
+
+## testing (4 records)
+[mx-325f0c] convention: every module gets a mirrored test file under tests/
+[mx-1bf64e] failure: monkeypatching tempfile broke parallel test runs
+[mx-7df01c] guide: adding a snapshot test
+[mx-77aa01] convention: store writes go through the atomic helper

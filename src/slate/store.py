@@ -93,6 +93,13 @@ class Store:
 
     # --- reading ---
 
+    def _display_path(self, path: Path) -> str:
+        """Repo-relative POSIX path for warnings (portable, snapshot-stable)."""
+        try:
+            return to_posix(str(path.relative_to(self.root.parent)))
+        except ValueError:
+            return to_posix(str(path))
+
     def _read_file(self, path: Path) -> tuple[list[dict], list[str]]:
         try:
             with open(path, encoding="utf-8", newline="") as fh:
@@ -109,12 +116,12 @@ class Store:
                 raw = json.loads(stripped)
             except json.JSONDecodeError as err:
                 preview = stripped[:77] + "..." if len(stripped) > 80 else stripped
-                warnings.append(f"{to_posix(str(path))}:{lineno}: malformed JSONL ({err.msg}). Line: {preview}")
+                warnings.append(f"{self._display_path(path)}:{lineno}: malformed JSONL ({err.msg}). Line: {preview}")
                 continue
             if isinstance(raw, dict):
                 records.append(raw)
             else:
-                warnings.append(f"{to_posix(str(path))}:{lineno}: expected a JSON object")
+                warnings.append(f"{self._display_path(path)}:{lineno}: expected a JSON object")
         return records, warnings
 
     def read(self, domain: str) -> tuple[list[dict], list[str]]:
@@ -122,6 +129,22 @@ class Store:
 
     def read_archive(self, domain: str) -> tuple[list[dict], list[str]]:
         return self._read_file(self.archive_path(domain))
+
+    def read_for_rewrite(self, domain: str) -> list[dict]:
+        """Read a domain that is about to be rewritten whole-file.
+
+        Refuses domains with unreadable lines: the tolerant reader skips them,
+        so a rewrite would silently drop those bytes from disk.
+        """
+        records, warnings = self.read(domain)
+        if warnings:
+            raise SlateError(
+                f"domain '{domain}' has {len(warnings)} unreadable line(s); "
+                "rewriting would silently drop them",
+                hint=warnings[0],
+                retry="slate doctor",
+            )
+        return records
 
     # --- writing ---
 

@@ -15,7 +15,7 @@ def run(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     store = require_store()
-    records, _ = store.read(args.domain)
+    records = store.read_for_rewrite(args.domain)
     index, record = resolve_id(records, args.record_id, domain=args.domain)
 
     if args.dry_run:

@@ -16,7 +16,7 @@ def run(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     store = require_store()
-    records, _ = store.read(args.source)
+    records = store.read_for_rewrite(args.source)
     index, record = resolve_id(records, args.record_id, domain=args.source)
 
     # Incoming references from any domain (relates_to/supersedes) keep pointing

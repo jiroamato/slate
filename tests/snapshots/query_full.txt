@@ -1,0 +1,6 @@
+## api (5 records)
+- [mx-f9ed1c] **atomic writes**: write to a temp file in the same directory then os.replace (src/store.py, src/io.py) (foundational) [commit: abc1234]
+- [mx-055788] **argparse over click**: stdlib keeps runtime deps to pyyaml only (foundational) [issue: #12]
+- [mx-8e5add] **mulch upstream**: the typescript project slate forked from (docs/design.md) (observational) [tags: fork]
+- [mx-c8156e] http handlers return typed envelopes, never raw dicts (tactical)
+- [mx-9a1b2c] jsonl read throughput (observational)

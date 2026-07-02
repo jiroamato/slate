@@ -24,7 +24,14 @@ def run(argv: list[str]) -> int:
 
     results = []
     for domain in store.domains():
-        records, _ = store.read(domain)
+        records, warnings = store.read(domain)
+        if warnings:
+            # A whole-file rewrite would drop the unreadable lines — skip.
+            results.append(
+                {"domain": domain, "stale": 0, "kept": len(records), "action": "skipped",
+                 "reason": f"{len(warnings)} unreadable line(s) — run slate doctor"}
+            )
+            continue
         stale = [r for r in records if schema.is_stale(r, now, shelf_life)]
         if not stale:
             continue
@@ -53,6 +60,9 @@ def run(argv: list[str]) -> int:
         print("nothing stale — no records pruned")
         return 0
     for row in results:
+        if row["action"] == "skipped":
+            print(f"{row['domain']}: skipped ({row['reason']})")
+            continue
         verb = {"dry-run": "would archive", "archived": "archived", "deleted": "deleted"}[row["action"]]
         print(f"{row['domain']}: {verb} {row['stale']} stale record(s), {row['kept']} kept")
     return 0

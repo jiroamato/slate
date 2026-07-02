@@ -1,0 +1,5 @@
+{"type":"pattern","name":"atomic writes","description":"write to a temp file in the same directory then os.replace","files":["src/store.py","src/io.py"],"classification":"foundational","recorded_at":"2026-05-01T10:00:00.000Z","evidence":{"commit":"abc1234"},"dir_anchors":["src"],"id":"mx-f9ed1c"}
+{"type":"decision","title":"argparse over click","rationale":"stdlib keeps runtime deps to pyyaml only","classification":"foundational","recorded_at":"2026-05-02T10:00:00.000Z","evidence":{"issue":"#12"},"id":"mx-055788"}
+{"type":"reference","name":"mulch upstream","description":"the typescript project slate forked from","files":["docs/design.md"],"classification":"observational","recorded_at":"2026-05-15T10:00:00.000Z","tags":["fork"],"id":"mx-8e5add"}
+{"type":"convention","content":"http handlers return typed envelopes, never raw dicts","classification":"tactical","recorded_at":"2026-06-25T10:00:00.000Z","outcomes":[{"status":"success"}],"id":"mx-c8156e"}
+{"type":"benchmark","name":"jsonl read throughput","metric":"records/sec","value":48000,"classification":"observational","recorded_at":"2026-06-01T10:00:00.000Z","id":"mx-9a1b2c"}
