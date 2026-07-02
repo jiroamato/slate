@@ -18,6 +18,7 @@ COMMANDS: dict[str, str] = {
     "prime": "slate.commands.prime",
     "search": "slate.commands.search_cmd",
     "edit": "slate.commands.edit",
+    "confirm": "slate.commands.confirm",
     "delete": "slate.commands.delete",
     "move": "slate.commands.move",
     "sync": "slate.commands.sync",
