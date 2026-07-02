@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -101,6 +102,7 @@ def test_session_start_compact_keeps_started_at_clears_lists_and_emits(
     hook(monkeypatch, "session-start", {"session_id": session}, capsys)
     state = read_state(repo, session)
     state["started_at"] = 12345.678  # sentinel: must survive compact
+    state["start_head"] = "cafe1234" * 5  # sentinel: the stop gate's diff baseline
     state["seen_files"] = ["src/store.py"]
     state["injected_ids"] = ["mx-abc123"]
     write_state(repo, state)
@@ -114,6 +116,7 @@ def test_session_start_compact_keeps_started_at_clears_lists_and_emits(
     after = read_state(repo, session)
     assert after["session_id"] == session
     assert after["started_at"] == 12345.678  # stop gate still spans the logical session
+    assert after["start_head"] == "cafe1234" * 5  # compact must not lose the diff baseline
     assert after["seen_files"] == []  # anchored records may re-inject
     assert after["injected_ids"] == []
 
@@ -338,6 +341,53 @@ def test_stop_passes_after_ack(stop_repo, monkeypatch, capsys):
     assert out == ""
 
 
+def test_stop_passes_after_confirm(stop_repo, monkeypatch, capsys):
+    session = start_session(monkeypatch, capsys)
+    big_diff(stop_repo)
+    baseline = json.loads(
+        (stop_repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert main(["confirm", "api", baseline["id"]]) == 0
+    capsys.readouterr()
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    assert out == ""  # the confirm advanced the store mtime, satisfying the gate
+
+
+def test_stop_block_message_offers_confirm_when_records_were_injected(
+    stop_repo, monkeypatch, capsys
+):
+    main(["record", "api", "--type", "pattern", "--name", "anchored pattern",
+          "--description", "pattern anchored to file0", "--files", "file0.py"])
+    capsys.readouterr()
+    injected_id = json.loads(
+        (stop_repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )["id"]
+    time.sleep(0.05)  # let the record's mtime land clearly before session start
+    session = start_session(monkeypatch, capsys)
+    payload = {
+        "session_id": session,
+        "tool_input": {"file_path": str(stop_repo / "file0.py")},
+    }
+    hook(monkeypatch, "pre-tool", payload, capsys)  # injects the anchored record
+    big_diff(stop_repo)
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    reason = json.loads(out)["reason"]
+    assert "slate confirm" in reason
+    assert injected_id in reason
+    assert "slate record" in reason  # the original two exits survive
+    assert "slate ack --no-lessons" in reason
+
+
+def test_stop_block_message_omits_confirm_without_injected_records(
+    stop_repo, monkeypatch, capsys
+):
+    session = start_session(monkeypatch, capsys)
+    big_diff(stop_repo)
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    reason = json.loads(out)["reason"]
+    assert "slate confirm" not in reason
+
+
 def test_stop_blocks_at_most_once_per_session(stop_repo, monkeypatch, capsys):
     session = start_session(monkeypatch, capsys)
     big_diff(stop_repo)
@@ -352,3 +402,81 @@ def test_stop_without_session_state_is_silent(stop_repo, monkeypatch, capsys):
     code, out = hook(monkeypatch, "stop", {"session_id": sid()}, capsys)
     assert code == 0
     assert out == ""
+
+
+# --- stop gate vs committed work (diff against session-start HEAD) ---
+
+
+def commit_all(repo, message="wip"):
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True)
+
+
+def state_file(repo, session):
+    return repo / "tmp" / "slate" / f"{session}.json"
+
+
+def test_session_start_records_start_head(stop_repo, monkeypatch, capsys):
+    session = start_session(monkeypatch, capsys)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=stop_repo, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    state = json.loads(state_file(stop_repo, session).read_text(encoding="utf-8"))
+    assert state["start_head"] == head
+
+
+def test_session_start_resolves_head_from_store_repo(stop_repo, monkeypatch, capsys):
+    # start_head must be resolved from the store's repo root — the same cwd
+    # _stop passes to diff_stats — not from the ambient process cwd, so the
+    # recorded SHA always belongs to the repo the stop gate later diffs
+    from slate import gitctx
+
+    seen = {}
+    real = gitctx.head_commit
+
+    def spy(cwd=None):
+        seen["cwd"] = cwd
+        return real(cwd)
+
+    monkeypatch.setattr(gitctx, "head_commit", spy)
+    start_session(monkeypatch, capsys)
+    assert seen["cwd"] is not None
+    assert Path(seen["cwd"]).resolve() == stop_repo.resolve()
+
+
+def test_stop_blocks_when_changes_committed_during_session(stop_repo, monkeypatch, capsys):
+    session = start_session(monkeypatch, capsys)
+    big_diff(stop_repo)
+    commit_all(stop_repo)  # clean working tree: HEAD diff alone would miss this
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == "block"
+    assert "slate record" in payload["reason"]
+
+
+def test_stop_old_state_without_start_head_falls_back_to_head_diff(
+    stop_repo, monkeypatch, capsys
+):
+    session = start_session(monkeypatch, capsys)
+    path = state_file(stop_repo, session)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state.pop("start_head", None)  # simulate a state file from an older slate
+    path.write_text(json.dumps(state), encoding="utf-8")
+    big_diff(stop_repo)  # uncommitted — HEAD diff still sees it
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    assert code == 0
+    assert json.loads(out)["decision"] == "block"
+
+
+def test_stop_invalid_start_head_falls_back_to_head_diff(stop_repo, monkeypatch, capsys):
+    session = start_session(monkeypatch, capsys)
+    path = state_file(stop_repo, session)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state["start_head"] = "deadbeef" * 5  # commit that no longer exists
+    path.write_text(json.dumps(state), encoding="utf-8")
+    big_diff(stop_repo)
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    assert code == 0
+    assert json.loads(out)["decision"] == "block"

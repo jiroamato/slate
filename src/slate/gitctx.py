@@ -40,9 +40,20 @@ def changed_files(cwd: Path | None = None) -> list[str]:
     return sorted(files)
 
 
-def diff_stats(cwd: Path | None = None) -> tuple[int, int]:
-    """(files changed, lines added+deleted) for the working tree vs HEAD."""
-    out = _git(["diff", "HEAD", "--numstat"], cwd)
+def diff_stats(cwd: Path | None = None, base: str | None = None) -> tuple[int, int]:
+    """(files changed, lines added+deleted) for the working tree vs `base`.
+
+    `base` defaults to HEAD. `git diff <commit>` compares the working tree
+    against that commit, so a session-start base counts both work committed
+    since then and uncommitted changes. If the base diff fails (commit gone,
+    history rewritten), fall back to HEAD — never to (0, 0), which would
+    silently disable the stop gate.
+    """
+    out = None
+    if base:
+        out = _git(["diff", base, "--numstat"], cwd)
+    if out is None:  # no base given, or the base diff failed
+        out = _git(["diff", "HEAD", "--numstat"], cwd)
     if not out:
         return (0, 0)
     files = 0

@@ -69,19 +69,26 @@ def _session_start(payload: dict) -> int:
         # is already in context)
         return 0
 
+    store = find_store()
     if source == "compact" and prior is not None:
         # context was summarized away: clear exactly the injection-tracking
-        # lists so records re-inject, but keep started_at (and every other
-        # field, known or not) — the stop gate compares store mtimes against
-        # started_at, and a compact is mid-logical-session, not a new one
+        # lists so records re-inject, but keep started_at and start_head (and
+        # every other field, known or not) — the stop gate diffs against
+        # start_head and compares store mtimes against started_at, and a
+        # compact is mid-logical-session, not a new one
         prior["seen_files"] = []
         prior["injected_ids"] = []
         sessions.save_state(prior)
     else:
         # startup / clear / unknown source, or no prior state to preserve
-        sessions.save_state(sessions.new_state(session_id))
+        from slate import gitctx
 
-    store = find_store()
+        # remember HEAD so the stop gate can count work committed mid-session;
+        # resolve it from the store's repo root — the same cwd _stop diffs in —
+        # so the SHA always belongs to the repo the gate later measures
+        start_head = gitctx.head_commit(store.root.parent if store else None)
+        sessions.save_state(sessions.new_state(session_id, start_head=start_head))
+
     if store is None:
         return 0
     domain_records: dict[str, list[dict]] = {}
@@ -193,7 +200,10 @@ def _stop(payload: dict) -> int:
 
     from slate import gitctx
 
-    files, lines = gitctx.diff_stats(store.root.parent)
+    # diff against the session-start HEAD so work committed during the session
+    # still counts; missing/invalid start_head falls back to HEAD inside
+    # diff_stats (old state files, rewritten history)
+    files, lines = gitctx.diff_stats(store.root.parent, base=state.get("start_head"))
     if files < thresholds["min_files"] and lines < thresholds["min_lines"]:
         return 0
 
@@ -208,11 +218,18 @@ def _stop(payload: dict) -> int:
 
     state["stop_blocked"] = True
     sessions.save_state(state)
+    injected = list(dict.fromkeys(i for i in state.get("injected_ids") or [] if i))[:3]
+    ways = "Three" if injected else "Two"
     reason = (
         f"This session changed {files} file(s) / {lines} line(s) but recorded no lesson. "
-        "Two ways to finish: record one — "
+        f"{ways} ways to finish: record one — "
         "slate record <domain> --type <convention|pattern|failure|decision|reference|guide> ... "
         '— or acknowledge there was nothing to learn: slate ack --no-lessons "<reason>".'
     )
+    if injected:
+        reason += (
+            " Or confirm a record that helped this session: slate confirm <domain> <id> "
+            f"(injected this session: {', '.join(injected)})."
+        )
     print(json.dumps({"decision": "block", "reason": reason}))
     return 0
