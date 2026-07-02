@@ -42,7 +42,15 @@ def run(argv: list[str]) -> int:
                     record["status"] = "archived"
                     record["archived_at"] = now_str
                     record["archive_reason"] = "stale"
-                store.append_archive(domain, stale)
+                # Archive-then-rewrite: a crash between the two duplicates a
+                # record (doctor flags it) rather than losing it. Skipping ids
+                # already in the archive keeps re-runs after such a crash from
+                # duplicating archive entries.
+                archived, _ = store.read_archive(domain)
+                archived_ids = {r.get("id") for r in archived}
+                to_archive = [r for r in stale if r.get("id") not in archived_ids]
+                if to_archive:
+                    store.append_archive(domain, to_archive)
             store.rewrite(domain, keep)
         results.append(
             {

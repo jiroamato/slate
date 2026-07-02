@@ -56,6 +56,7 @@ SLATE_NOW=2026-07-06T00:00:00.000Z slate prune
 
 uv run --project "$REPO" --quiet python - <<'PY'
 import hashlib
+import sys
 from pathlib import Path
 
 digest = hashlib.sha256()
@@ -67,5 +68,7 @@ for path in sorted(root.rglob("*")):
     digest.update(b"\0")
     digest.update(path.read_bytes())
     digest.update(b"\0")
-print(digest.hexdigest())
+# raw bytes: print() would newline-translate to \r\n on Windows and the
+# digest files themselves would differ across OSes
+sys.stdout.buffer.write(digest.hexdigest().encode() + b"\n")
 PY

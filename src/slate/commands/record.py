@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 
 from slate import gitctx, schema
 from slate.anchors import assert_writable_dir_anchor, infer_dir_anchors, normalize_dir_anchor
@@ -187,7 +186,11 @@ def run(argv: list[str]) -> int:
     similar, score = similarity(existing, record)
 
     if similar is not None and score >= threshold and not args.force:
-        quoted = " ".join(shlex.quote(a) for a in argv)
+        # Display-only quoting that works on cmd, PowerShell and bash alike —
+        # shlex.quote would emit POSIX single quotes that break on Windows.
+        quoted = " ".join(
+            '"' + a.replace('"', '\\"') + '"' if (" " in a or '"' in a) else a for a in argv
+        )
         retry = f"slate record {quoted} --force --supersedes {similar.get('id')}"
         message = (
             f"near-duplicate of {similar.get('id')} (similarity {score:.2f}, "

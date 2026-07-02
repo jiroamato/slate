@@ -65,6 +65,8 @@ def search_records(
     docs = [(record, tokenize(extract_text(record))) for record in records]
     total_len = sum(len(tokens) for _, tokens in docs)
     avg_len = total_len / len(docs) if docs else 0.0
+    if avg_len == 0.0:
+        return []  # nothing tokenizable anywhere — no match is possible
 
     doc_freq: Counter[str] = Counter()
     for _, tokens in docs:
