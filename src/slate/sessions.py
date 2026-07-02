@@ -37,13 +37,17 @@ def load_state(session_id: str) -> dict | None:
         return None
 
 
-def new_state(session_id: str) -> dict:
+def new_state(session_id: str, start_head: str | None = None) -> dict:
+    # start_head: HEAD commit at session start, used by the stop gate to
+    # measure work that was committed during the session. Older state files
+    # lack the key — readers must use state.get("start_head").
     return {
         "session_id": session_id,
         "started_at": time.time(),
         "seen_files": [],
         "injected_ids": [],
         "stop_blocked": False,
+        "start_head": start_head,
     }
 
 

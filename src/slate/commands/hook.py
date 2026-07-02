@@ -60,7 +60,10 @@ def _emit(event_name: str, context: str) -> None:
 
 def _session_start(payload: dict) -> int:
     session_id = str(payload.get("session_id") or "unknown")
-    sessions.save_state(sessions.new_state(session_id))
+    from slate import gitctx
+
+    # remember HEAD so the stop gate can count work committed mid-session
+    sessions.save_state(sessions.new_state(session_id, start_head=gitctx.head_commit()))
 
     store = find_store()
     if store is None:
@@ -174,7 +177,10 @@ def _stop(payload: dict) -> int:
 
     from slate import gitctx
 
-    files, lines = gitctx.diff_stats(store.root.parent)
+    # diff against the session-start HEAD so work committed during the session
+    # still counts; missing/invalid start_head falls back to HEAD inside
+    # diff_stats (old state files, rewritten history)
+    files, lines = gitctx.diff_stats(store.root.parent, base=state.get("start_head"))
     if files < thresholds["min_files"] and lines < thresholds["min_lines"]:
         return 0
 
