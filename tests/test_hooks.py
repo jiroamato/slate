@@ -169,6 +169,19 @@ def test_read_injects_index_once_and_edit_still_injects_full(repo, monkeypatch, 
     assert "temp file then os.replace" in context
 
 
+def test_read_injection_is_capped_for_anchor_heavy_files(repo, monkeypatch, capsys):
+    for i in range(15):
+        main(["record", f"dom{i}", "--type", "pattern",
+              "--name", f"store access pattern number {i}",
+              "--description", "some detail", "--files", "src/store.py"])
+    capsys.readouterr()
+    code, out = hook(monkeypatch, "pre-tool", read_payload(repo, sid()), capsys)
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert context.count("[mx-") == 10  # capped, not all 15
+    assert "5 more" in context
+
+
 def test_read_of_unanchored_file_is_silent(repo, monkeypatch, capsys):
     seed_anchored_record(capsys)
     payload = {
@@ -299,6 +312,28 @@ def test_prompt_caps_suggestions_at_five(repo, monkeypatch, capsys):
     assert code == 0
     context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert context.count("[mx-") == 5
+
+
+def test_prompt_budget_skips_oversize_line_but_keeps_shorter_hits(repo, monkeypatch, capsys):
+    from slate.commands import hook as hook_mod
+
+    long_content = ("alpha bravo charlie delta echo foxtrot " * 6).strip()
+    main(["record", "d1", "--type", "convention", "--content", long_content])
+    main(["record", "d2", "--type", "convention", "--content", "alpha bravo wins"])
+    capsys.readouterr()
+    # budget leaves room for the short line only; the top-ranked record's line
+    # overshoots and must be skipped, not end the loop
+    monkeypatch.setattr(hook_mod, "PROMPT_BUDGET", 40)
+    code, out = hook(
+        monkeypatch,
+        "prompt",
+        {"session_id": sid(), "prompt": "alpha bravo charlie delta echo foxtrot"},
+        capsys,
+    )
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "alpha bravo wins" in context  # the shorter, lower-ranked hit still lands
+    assert "foxtrot" not in context  # the oversize top hit is skipped
 
 
 def test_prompt_tolerates_old_state_file_without_new_fields(repo, monkeypatch, capsys):

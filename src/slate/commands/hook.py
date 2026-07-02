@@ -155,6 +155,10 @@ def _pre_tool(payload: dict) -> int:
     return 0
 
 
+READ_BUDGET = 600  # tokens — index hints only; the first edit injects records in full
+READ_MAX_HITS = 10
+
+
 def _pre_tool_read(store, state: dict, rel: str) -> int:
     """Read of an anchored file: inject index lines only, once per file.
     Deliberately does NOT touch seen_files/injected_ids — a later Edit of the
@@ -165,20 +169,37 @@ def _pre_tool_read(store, state: dict, rel: str) -> int:
         return 0  # already read-injected, or the full records already went in
     read_seen.append(rel)
 
-    lines: list[str] = []
+    matched: list[tuple[str, dict]] = []
     for domain in store.domains():
         records, _ = store.read(domain)
-        lines.extend(
-            f"{domain}: {priming.index_line(r)}"
+        matched.extend(
+            (domain, r)
             for r in records
             if (r.get("id") is None or r["id"] not in state["injected_ids"])
             and _matches(r, rel)
         )
-    if lines:
+    if matched:
+        # best records first, capped like the prompt hook — an anchor-heavy
+        # file must not blow a hole in the context window
+        order = {id(r): i for i, r in enumerate(priming.rank([r for _, r in matched]))}
+        matched.sort(key=lambda pair: order[id(pair[1])])
         header = (
             f"Recorded lessons anchored to {rel} — index only, full records "
             "inject on first edit (fetch now: slate query <domain> --id <id>):\n\n"
         )
+        used = priming.estimate_tokens(header)
+        lines: list[str] = []
+        omitted = 0
+        for domain, record in matched:
+            line = f"{domain}: {priming.index_line(record)}"
+            cost = priming.estimate_tokens(line)
+            if len(lines) >= READ_MAX_HITS or used + cost > READ_BUDGET:
+                omitted += 1
+                continue
+            lines.append(line)
+            used += cost
+        if omitted:
+            lines.append(f"…{omitted} more — the first edit injects the full set")
         _emit("PreToolUse", priming.wrap_delimited(header + "\n".join(lines)))
     sessions.save_state(state)
     return 0
@@ -229,7 +250,7 @@ def _prompt(payload: dict) -> int:
         line = f"{domain_of[id(record)]}: {priming.index_line(record)}"
         cost = priming.estimate_tokens(line)
         if used + cost > PROMPT_BUDGET:
-            break
+            continue  # oversize line — a shorter lower-ranked hit may still fit
         already.add(rid)
         picked.append(rid)
         lines.append(line)
