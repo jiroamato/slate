@@ -33,6 +33,12 @@ USAGE = "usage: slate <command> [options]\ncommands: " + ", ".join(COMMANDS)
 
 
 def main(argv: list[str] | None = None) -> int:
+    # One canonical output encoding on every OS: Windows pipes default to the
+    # locale code page (cp1252), which can't encode slate's output (→, …).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     args = list(sys.argv[1:] if argv is None else argv)
     json_mode = "--json" in args
 
