@@ -216,6 +216,53 @@ def test_stop_passes_after_ack(stop_repo, monkeypatch, capsys):
     assert out == ""
 
 
+def test_stop_passes_after_confirm(stop_repo, monkeypatch, capsys):
+    session = start_session(monkeypatch, capsys)
+    big_diff(stop_repo)
+    baseline = json.loads(
+        (stop_repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert main(["confirm", "api", baseline["id"]]) == 0
+    capsys.readouterr()
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    assert out == ""  # the confirm advanced the store mtime, satisfying the gate
+
+
+def test_stop_block_message_offers_confirm_when_records_were_injected(
+    stop_repo, monkeypatch, capsys
+):
+    main(["record", "api", "--type", "pattern", "--name", "anchored pattern",
+          "--description", "pattern anchored to file0", "--files", "file0.py"])
+    capsys.readouterr()
+    injected_id = json.loads(
+        (stop_repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )["id"]
+    time.sleep(0.05)  # let the record's mtime land clearly before session start
+    session = start_session(monkeypatch, capsys)
+    payload = {
+        "session_id": session,
+        "tool_input": {"file_path": str(stop_repo / "file0.py")},
+    }
+    hook(monkeypatch, "pre-tool", payload, capsys)  # injects the anchored record
+    big_diff(stop_repo)
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    reason = json.loads(out)["reason"]
+    assert "slate confirm" in reason
+    assert injected_id in reason
+    assert "slate record" in reason  # the original two exits survive
+    assert "slate ack --no-lessons" in reason
+
+
+def test_stop_block_message_omits_confirm_without_injected_records(
+    stop_repo, monkeypatch, capsys
+):
+    session = start_session(monkeypatch, capsys)
+    big_diff(stop_repo)
+    code, out = hook(monkeypatch, "stop", {"session_id": session}, capsys)
+    reason = json.loads(out)["reason"]
+    assert "slate confirm" not in reason
+
+
 def test_stop_blocks_at_most_once_per_session(stop_repo, monkeypatch, capsys):
     session = start_session(monkeypatch, capsys)
     big_diff(stop_repo)
