@@ -191,6 +191,51 @@ def test_move_crash_between_operations_never_loses_the_record(repo, monkeypatch,
     assert "precious lesson" in target  # append-to-target must happen first
 
 
+def test_setup_writes_settings_atomically(repo, monkeypatch):
+    # a crashing write must leave the previous settings.json intact
+    from slate import store as store_mod
+
+    claude_dir = repo / ".claude"
+    claude_dir.mkdir()
+    original = '{"model": "opus"}'
+    (claude_dir / "settings.json").write_text(original, encoding="utf-8")
+
+    real_replace = store_mod.os.replace
+
+    def exploding_replace(src, dst):
+        raise KeyboardInterrupt("simulated interrupt mid-write")
+
+    monkeypatch.setattr(store_mod.os, "replace", exploding_replace)
+    with pytest.raises(KeyboardInterrupt):
+        main(["setup", "claude"])
+    monkeypatch.setattr(store_mod.os, "replace", real_replace)
+    assert (claude_dir / "settings.json").read_text(encoding="utf-8") == original
+
+
+def test_doctor_governance_uses_warn_entries_band(repo, capsys):
+    (repo / ".slate" / "slate.config.yaml").write_text(
+        "governance:\n  max_entries: 2\n  warn_entries: 4\n  hard_limit: 6\n",
+        encoding="utf-8",
+    )
+    line = (
+        '{"type":"convention","content":"note %d","classification":"foundational",'
+        '"recorded_at":"2026-06-01T00:00:00.000Z","id":"mx-%06d"}\n'
+    )
+    path = repo / ".slate" / "expertise" / "api.jsonl"
+
+    path.write_text("".join(line % (i, i) for i in range(3)), encoding="utf-8")  # > soft (2)
+    assert main(["doctor"]) == 0
+    assert "soft limit" in capsys.readouterr().out
+
+    path.write_text("".join(line % (i, i) for i in range(5)), encoding="utf-8")  # > warn (4)
+    assert main(["doctor"]) == 0
+    assert "approaching the hard limit" in capsys.readouterr().out
+
+    path.write_text("".join(line % (i, i) for i in range(7)), encoding="utf-8")  # > hard (6)
+    assert main(["doctor"]) == 1
+    assert "hard limit" in capsys.readouterr().out
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")

@@ -124,16 +124,36 @@ def run(argv: list[str]) -> int:
             for domain, records in all_records.items()
             if len(records) > governance["hard_limit"]
         ]
+        approaching = [
+            domain
+            for domain, records in all_records.items()
+            if governance["warn_entries"] < len(records) <= governance["hard_limit"]
+        ]
         over_soft = [
             domain
             for domain, records in all_records.items()
-            if governance["max_entries"] < len(records) <= governance["hard_limit"]
+            if governance["max_entries"] < len(records) <= governance["warn_entries"]
         ]
         if over_hard:
             checks.append(_check("governance", "fail", "domain over hard limit", over_hard))
+        elif approaching:
+            checks.append(
+                _check(
+                    "governance",
+                    "warn",
+                    f"domain(s) approaching the hard limit "
+                    f"(> {governance['warn_entries']} records): {', '.join(approaching)} "
+                    "— run slate prune",
+                )
+            )
         elif over_soft:
             checks.append(
-                _check("governance", "warn", f"domain(s) over soft limit: {', '.join(over_soft)}")
+                _check(
+                    "governance",
+                    "warn",
+                    f"domain(s) over the soft limit "
+                    f"(> {governance['max_entries']} records): {', '.join(over_soft)}",
+                )
             )
         else:
             checks.append(_check("governance", "ok", "all domains within limits"))

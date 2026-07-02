@@ -11,7 +11,7 @@ from pathlib import Path
 
 from slate.commands._common import base_parser, git_root
 from slate.output import SlateError, emit
-from slate.store import require_store
+from slate.store import atomic_write, require_store
 
 _HOOK_PREFIX = "slate hook"
 
@@ -125,9 +125,9 @@ def run(argv: list[str]) -> int:
     settings = _remove(settings) if args.remove else _install(settings, store.root.name)
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(settings, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    # atomic: an interrupted plain write would corrupt settings.json and
+    # silently disable every hook in it (slate's and the user's alike)
+    atomic_write(settings_path, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
 
     if args.remove:
         emit(

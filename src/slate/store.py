@@ -33,7 +33,7 @@ def dumps_record(record: dict) -> str:
     return json.dumps(record, separators=(",", ":"), ensure_ascii=False)
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def atomic_write(path: Path, content: str) -> None:
     """Same-directory temp file + os.replace, with a bounded retry for the
     Windows PermissionError when another process momentarily holds the target."""
     tmp = path.with_name(f"{path.name}.tmp.{uuid.uuid4().hex[:8]}")
@@ -166,7 +166,7 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         content = "".join(dumps_record(r) + "\n" for r in records)
         with file_lock(path):
-            _atomic_write(path, content)
+            atomic_write(path, content)
 
     def append_archive(self, domain: str, records: list[dict]) -> None:
         path = self.archive_path(domain)
