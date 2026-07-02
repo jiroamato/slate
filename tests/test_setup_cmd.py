@@ -33,7 +33,7 @@ def test_setup_claude_installs_hooks_and_permissions(repo, capsys):
     assert "slate hook stop" in hook_commands(cfg, "Stop")
     assert "slate hook prompt" in hook_commands(cfg, "UserPromptSubmit")
     pre_entry = cfg["hooks"]["PreToolUse"][0]
-    assert pre_entry["matcher"] == "Edit|Write"
+    assert pre_entry["matcher"] == "Edit|Write|Read"
     deny = cfg["permissions"]["deny"]
     assert "Edit(.slate/expertise/**)" in deny
     assert "Write(.slate/expertise/**)" in deny

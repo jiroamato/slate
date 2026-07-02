@@ -125,6 +125,8 @@ def _pre_tool(payload: dict) -> int:
     state = sessions.load_state(session_id) or sessions.new_state(session_id)
 
     rel = _relative_to_repo(str(file_path), store.root.parent)
+    if str(payload.get("tool_name") or "") == "Read":
+        return _pre_tool_read(store, state, rel)
     if rel in state["seen_files"]:
         return 0
     state["seen_files"].append(rel)
@@ -149,6 +151,35 @@ def _pre_tool(payload: dict) -> int:
         body = priming.render_full(matched)
         header = f"Records anchored to {rel}:\n\n"
         _emit("PreToolUse", priming.wrap_delimited(header + body))
+    sessions.save_state(state)
+    return 0
+
+
+def _pre_tool_read(store, state: dict, rel: str) -> int:
+    """Read of an anchored file: inject index lines only, once per file.
+    Deliberately does NOT touch seen_files/injected_ids — a later Edit of the
+    same file must still inject the full records."""
+    # setdefault: state files written before this field existed must still load
+    read_seen = state.setdefault("read_seen_files", [])
+    if rel in read_seen or rel in state["seen_files"]:
+        return 0  # already read-injected, or the full records already went in
+    read_seen.append(rel)
+
+    lines: list[str] = []
+    for domain in store.domains():
+        records, _ = store.read(domain)
+        lines.extend(
+            f"{domain}: {priming.index_line(r)}"
+            for r in records
+            if (r.get("id") is None or r["id"] not in state["injected_ids"])
+            and _matches(r, rel)
+        )
+    if lines:
+        header = (
+            f"Recorded lessons anchored to {rel} — index only, full records "
+            "inject on first edit (fetch now: slate query <domain> --id <id>):\n\n"
+        )
+        _emit("PreToolUse", priming.wrap_delimited(header + "\n".join(lines)))
     sessions.save_state(state)
     return 0
 

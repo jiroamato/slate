@@ -131,6 +131,85 @@ def test_pre_tool_fast_path_avoids_yaml_import(repo, monkeypatch, capsys):
     assert "yaml" not in sys.modules
 
 
+# --- pre-tool Read (index-only injection) ---
+
+
+def read_payload(repo, session):
+    return {
+        "session_id": session,
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "src" / "store.py")},
+    }
+
+
+def edit_payload(repo, session):
+    return {
+        "session_id": session,
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "src" / "store.py")},
+    }
+
+
+def test_read_injects_index_once_and_edit_still_injects_full(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    code, out = hook(monkeypatch, "pre-tool", read_payload(repo, session), capsys)
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "atomic writes" in context  # the index line
+    assert "temp file then os.replace" not in context  # not the full record
+    assert "slate query" in context
+    # second Read of the same file: silent
+    code, out = hook(monkeypatch, "pre-tool", read_payload(repo, session), capsys)
+    assert code == 0
+    assert out == ""
+    # a later Edit of the same file still injects the full records
+    code, out = hook(monkeypatch, "pre-tool", edit_payload(repo, session), capsys)
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "temp file then os.replace" in context
+
+
+def test_read_of_unanchored_file_is_silent(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    payload = {
+        "session_id": sid(),
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "docs" / "notes.md")},
+    }
+    code, out = hook(monkeypatch, "pre-tool", payload, capsys)
+    assert code == 0
+    assert out == ""
+
+
+def test_read_after_full_injection_is_silent(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    _, out = hook(monkeypatch, "pre-tool", edit_payload(repo, session), capsys)
+    assert "temp file then os.replace" in out
+    code, out = hook(monkeypatch, "pre-tool", read_payload(repo, session), capsys)
+    assert code == 0
+    assert out == ""
+
+
+def test_read_tolerates_old_state_file_without_new_fields(repo, monkeypatch, capsys):
+    seed_anchored_record(capsys)
+    session = sid()
+    old_state = {
+        "session_id": session,
+        "started_at": time.time(),
+        "seen_files": [],
+        "injected_ids": [],
+        "stop_blocked": False,
+    }
+    state_file = repo / "tmp" / "slate" / f"{session}.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(old_state), encoding="utf-8")
+    code, out = hook(monkeypatch, "pre-tool", read_payload(repo, session), capsys)
+    assert code == 0
+    assert "atomic writes" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert not (repo / "tmp" / "slate" / "hook-errors.log").exists()
+
+
 # --- prompt (UserPromptSubmit retrieval) ---
 
 
