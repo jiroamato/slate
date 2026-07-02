@@ -1,0 +1,9 @@
+ok: config — config parses
+fail: jsonl-integrity — 1 unreadable line(s)
+    .mulch/expertise/corrupt.jsonl:2: malformed JSONL (Unterminated string starting at). Line: {"type":"convention","content":"this line is broken
+ok: schema-validation — all builtin-type records valid
+warn: unknown-types — unknown record type(s) preserved by the tolerant reader: benchmark ×1
+ok: duplicates — no duplicate identity keys
+warn: stale-records — 3 stale record(s) — run slate prune
+ok: governance — all domains within limits
+ok: dedup-gate — no forced writes logged

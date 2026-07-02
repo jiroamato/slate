@@ -1,0 +1,3 @@
+[mx-f9ed1c] pattern: atomic writes (files: src/store.py +1)  (api, score 4.91)
+[mx-77aa01] convention: store writes go through the atomic helper  (testing, score 1.74)
+[mx-325f0c] convention: every module gets a mirrored test file under tests/  (testing, score 1.44)

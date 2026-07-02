@@ -1,0 +1,4 @@
+{"type":"convention","content":"every module gets a mirrored test file under tests/","classification":"foundational","recorded_at":"2026-04-01T09:00:00.000Z","tags":["layout","pytest"],"id":"mx-325f0c"}
+{"type":"failure","description":"monkeypatching tempfile broke parallel test runs","resolution":"isolate session state under tmp_path per test","classification":"tactical","recorded_at":"2026-05-10T14:30:00.000Z","tags":["pytest"],"id":"mx-1bf64e"}
+{"type":"guide","name":"adding a snapshot test","description":"copy the golden store, run the command, compare stdout","classification":"tactical","recorded_at":"2026-06-20T08:15:00.000Z","id":"mx-7df01c"}
+{"type":"convention","content":"store writes go through the atomic helper","classification":"tactical","recorded_at":"2026-06-26T10:00:00.000Z","relates_to":["api:mx-f9ed1c"],"id":"mx-77aa01"}

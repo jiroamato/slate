@@ -1,0 +1,3 @@
+api: would archive 1 stale record(s), 4 kept
+corrupt: skipped (1 unreadable line(s) — run slate doctor)
+testing: would archive 1 stale record(s), 3 kept
