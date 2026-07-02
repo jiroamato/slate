@@ -47,7 +47,7 @@ def run(argv: list[str]) -> int:
                 # already in the archive keeps re-runs after such a crash from
                 # duplicating archive entries.
                 archived, _ = store.read_archive(domain)
-                archived_ids = {r.get("id") for r in archived}
+                archived_ids = {r.get("id") for r in archived} - {None}
                 to_archive = [r for r in stale if r.get("id") not in archived_ids]
                 if to_archive:
                     store.append_archive(domain, to_archive)

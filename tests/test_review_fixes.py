@@ -95,6 +95,27 @@ def test_prune_rerun_does_not_duplicate_archived_records(repo, monkeypatch, caps
     assert live.read_text(encoding="utf-8") == ""
 
 
+def test_prune_archives_stale_idless_record_even_when_archive_has_idless_entry(repo, capsys):
+    # neither record carries an id: the archived_ids skip-set must not treat
+    # None == None as "already archived" and silently drop the live record
+    (repo / ".slate" / "archive").mkdir(exist_ok=True)
+    (repo / ".slate" / "archive" / "api.jsonl").write_text(
+        "# ARCHIVED\n"
+        '{"type":"convention","content":"previously archived","classification":"observational",'
+        '"recorded_at":"2025-01-01T00:00:00.000Z","status":"archived"}\n',
+        encoding="utf-8",
+    )
+    (repo / ".slate" / "expertise" / "api.jsonl").write_text(
+        '{"type":"convention","content":"stale and id-less","classification":"observational",'
+        '"recorded_at":"2026-01-01T00:00:00.000Z"}\n',
+        encoding="utf-8",
+    )
+    assert main(["prune"]) == 0
+    archive_text = (repo / ".slate" / "archive" / "api.jsonl").read_text(encoding="utf-8")
+    assert "stale and id-less" in archive_text  # archived, not silently dropped
+    assert (repo / ".slate" / "expertise" / "api.jsonl").read_text(encoding="utf-8") == ""
+
+
 def test_doctor_flags_record_in_both_live_and_archive(repo, capsys):
     line = '{"type":"convention","content":"dup","classification":"observational","recorded_at":"2026-01-01T00:00:00.000Z","id":"mx-dupdup"}\n'
     (repo / ".slate" / "expertise" / "api.jsonl").write_text(line, encoding="utf-8")
